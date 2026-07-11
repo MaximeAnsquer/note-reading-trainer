@@ -789,10 +789,10 @@ function onCorrect() {
   if (unlocked) {
     setTimeout(() => {
       setFeedback(`🎉 Nouvelle note débloquée : ${unlocked.label} (${unlocked.clef === 'treble' ? 'clé de sol' : 'clé de fa'})`, 'success');
-    }, 950);
+    }, 150);
   }
   advanceAfterCorrect();
-  if (state.autoMode) setTimeout(() => beginRound(), unlocked ? 1900 : 900);
+  if (state.autoMode) setTimeout(() => beginRound(), unlocked ? 600 : 80);
 }
 
 function onIncorrect(rawHeard, interpretedLabel) {
