@@ -297,11 +297,24 @@ body {
 }
 
 .clef-row-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   font-size: 12px;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 6px;
+}
+
+.next-unlock {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .clef-row {
@@ -319,6 +332,20 @@ body {
   color: white;
   background: var(--locked);
   position: relative;
+  transition: background 0.3s ease;
+}
+
+.note-cell.flash-good { animation: flashGood 0.7s ease; }
+.note-cell.flash-bad { animation: flashBad 0.7s ease; }
+
+@keyframes flashGood {
+  0% { box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.9); transform: scale(1.08); }
+  100% { box-shadow: 0 0 0 0 rgba(42, 157, 143, 0); transform: scale(1); }
+}
+
+@keyframes flashBad {
+  0% { box-shadow: 0 0 0 3px rgba(230, 57, 70, 0.9); transform: scale(1.08); }
+  100% { box-shadow: 0 0 0 0 rgba(230, 57, 70, 0); transform: scale(1); }
 }
 
 .note-cell .pick-pct {
@@ -339,11 +366,17 @@ body {
 .note-cell .bar-fill {
   height: 100%;
   background: white;
+  transition: width 0.4s ease;
 }
 
 .note-cell.locked {
   color: #8a8f9c;
   background: #eef0f4;
+}
+
+.note-cell.locked .pick-pct,
+.note-cell.locked .bar {
+  display: none;
 }
 
 .note-cell.weak { background: var(--error); }

@@ -53,6 +53,17 @@ const FAST_ANSWER_MS = 1500;
 const SLOW_ANSWER_MS = 6000;
 const MIN_CORRECT_SCORE = 0.5;
 
+// A freshly unlocked note gets a large pick-weight bonus that fades over its
+// first attempts, so new material shows up immediately and repeatedly while
+// it's being introduced instead of drowning in the growing practice pool.
+const NOVELTY_ATTEMPTS = 6;
+const NOVELTY_BONUS = 1.0;
+
+// Notes not asked for a while get a gentle boost (capped), so mastered notes
+// keep resurfacing for spaced review instead of disappearing forever once
+// their mastery weight bottoms out.
+const STALENESS_BONUS = 0.12;
+
 function correctnessScore(correct, elapsedMs) {
   if (!correct) return 0;
   if (elapsedMs <= FAST_ANSWER_MS) return 1;
@@ -152,6 +163,7 @@ state.listeningRequested = false;
 state.noteBatch = [];
 state.batchDone = [];
 state.batchIndex = 0;
+state.lastAnswered = null;
 
 // ---------- DOM ----------
 
@@ -214,17 +226,19 @@ function renderBatch(batch, currentIndex, doneMask) {
   }
 }
 
-// Live probability that this note gets picked on the next draw, given the
-// current practice pool (respects clef mode) and everyone's mastery level.
-// Notes outside the active pool (locked, or excluded by the clef filter)
-// have no chance of being picked right now, hence 0%.
-function pickProbability(note) {
+// Live probability of each note being picked on the next draw, given the
+// current practice pool (respects clef mode) and the same weights the picker
+// actually uses. Notes outside the active pool (locked, or excluded by the
+// clef filter) are absent from the map and display as 0%.
+function pickProbabilities() {
   const pool = unlockedNotesForPractice();
-  if (!pool.some((n) => n.id === note.id)) return 0;
-  const totalWeight = pool.reduce((sum, n) => sum + noteMasteryWeight(state.progress[n.id].ema), 0);
-  if (totalWeight <= 0) return 0;
-  const weight = noteMasteryWeight(state.progress[note.id].ema);
-  return Math.round((weight / totalWeight) * 100);
+  const weights = pool.map((n) => noteWeight(n, pool.length));
+  const total = weights.reduce((a, b) => a + b, 0);
+  const map = new Map();
+  if (total > 0) {
+    pool.forEach((n, i) => map.set(n.id, Math.round((weights[i] / total) * 100)));
+  }
+  return map;
 }
 
 function renderSingleStaffBatch(batch, currentIndex, doneMask, clef) {
@@ -308,11 +322,22 @@ function unlockedNotesForPractice() {
   );
 }
 
-// Sharpens the gap between weak and mastered notes; the small floor keeps
-// mastered notes reachable for review without letting their combined weight
-// (there can be many of them) drown out the few notes that still need work.
-function noteMasteryWeight(ema) {
-  return Math.pow(1 - ema, 4) + 0.03;
+// Pick weight combines three pressures:
+// - mastery gap: sharply favors notes still being missed; the small floor
+//   keeps mastered notes reachable without letting their combined weight
+//   (there can be many of them) drown out the few notes that need work;
+// - novelty: freshly unlocked notes are drilled right away and often, fading
+//   back to normal over their first NOVELTY_ATTEMPTS attempts;
+// - staleness: notes unseen for roughly six laps of the pool earn the full
+//   (small) review bonus, so mastered notes still resurface periodically.
+function noteWeight(note, poolSize) {
+  const p = state.progress[note.id];
+  let w = Math.pow(1 - p.ema, 4) + 0.03;
+  w += NOVELTY_BONUS * Math.max(0, 1 - p.attempts / NOVELTY_ATTEMPTS);
+  const gap = state.stats.totalAttempts - (p.lastSeenAt || 0);
+  const horizon = Math.max(1, 6 * poolSize);
+  w += STALENESS_BONUS * Math.min(1, gap / horizon);
+  return w;
 }
 
 function pickNextNote(excludeId) {
@@ -324,7 +349,7 @@ function pickNextNote(excludeId) {
     if (withoutPrevious.length > 0) candidates = withoutPrevious;
   }
 
-  const weights = candidates.map((n) => noteMasteryWeight(state.progress[n.id].ema));
+  const weights = candidates.map((n) => noteWeight(n, candidates.length));
   const total = weights.reduce((a, b) => a + b, 0);
   let r = Math.random() * total;
   for (let i = 0; i < candidates.length; i++) {
@@ -334,26 +359,32 @@ function pickNextNote(excludeId) {
   return candidates[candidates.length - 1];
 }
 
-function maybeUnlockNext(clef) {
+// The note whose mastery gates the next unlock, and the note that would be
+// unlocked. Unlocked notes don't necessarily form a contiguous prefix of the
+// sequence (widening the range added notes below already-unlocked ones), so
+// the next candidate is the lowest locked note, not seq[unlocked.length].
+function unlockGate(clef) {
   const seq = NOTES.filter((n) => n.clef === clef).sort((a, b) => a.order - b.order);
   const unlocked = seq.filter((n) => state.progress[n.id].unlocked);
-  if (unlocked.length === seq.length) return null;
+  const next = seq.find((n) => !state.progress[n.id].unlocked);
+  if (!next || unlocked.length === 0) return null;
 
   // Only the most recently unlocked note needs to be mastered — requiring
   // every previously-unlocked note to stay simultaneously "ready" made later
   // notes (often the same letter on another octave) take longer and longer
   // to reach as the practice pool grew.
-  const mostRecent = unlocked[unlocked.length - 1];
-  const p = state.progress[mostRecent.id];
-  const ready = p.attempts >= MIN_ATTEMPTS_TO_UNLOCK && p.ema >= UNLOCK_THRESHOLD;
+  const gate = state.progress[unlocked[unlocked.length - 1].id];
+  const attemptsPart = Math.min(1, gate.attempts / MIN_ATTEMPTS_TO_UNLOCK);
+  const emaPart = Math.min(1, gate.ema / UNLOCK_THRESHOLD);
+  return { next, progress: Math.min(attemptsPart, emaPart) };
+}
 
-  if (ready) {
-    const next = seq[unlocked.length];
-    state.progress[next.id].unlocked = true;
-    state.progress[next.id].ema = 0.35;
-    return next;
-  }
-  return null;
+function maybeUnlockNext(clef) {
+  const info = unlockGate(clef);
+  if (!info || info.progress < 1) return null;
+  state.progress[info.next.id].unlocked = true;
+  state.progress[info.next.id].ema = 0.35;
+  return info.next;
 }
 
 function updateAfterAnswer(note, correct, elapsedMs) {
@@ -363,6 +394,8 @@ function updateAfterAnswer(note, correct, elapsedMs) {
   p.ema = p.ema + EMA_ALPHA * (score - p.ema);
 
   state.stats.totalAttempts += 1;
+  p.lastSeenAt = state.stats.totalAttempts;
+  state.lastAnswered = { id: note.id, correct };
   if (correct) {
     state.stats.totalCorrect += 1;
     state.stats.streak += 1;
@@ -759,7 +792,9 @@ function beginRound() {
   state.currentNote = state.noteBatch[state.batchIndex];
   state.noteShownAt = Date.now();
   renderBatch(state.noteBatch, state.batchIndex, state.batchDone);
-  setFeedback('', '');
+  // Deliberately keep the last feedback visible: rounds now chain instantly
+  // after a correct answer, so clearing here would wipe the ✅ message in the
+  // same frame it was written.
   beginListening();
 }
 
@@ -784,8 +819,11 @@ function onCorrect() {
   const note = state.currentNote;
   const elapsedMs = Date.now() - (state.noteShownAt || Date.now());
   const elapsedLabel = (elapsedMs / 1000).toFixed(1) + 's';
-  setFeedback(`✅ Correct ! C'était ${note.label} (${elapsedLabel})`, 'success');
+  const speed = elapsedMs <= FAST_ANSWER_MS ? ' ⚡' : elapsedMs >= SLOW_ANSWER_MS ? ' 🐢' : '';
   const unlocked = updateAfterAnswer(note, true, elapsedMs);
+  const streak = state.stats.streak;
+  const milestone = streak > 0 && streak % 10 === 0 ? ` · 🔥 ${streak} d'affilée !` : '';
+  setFeedback(`✅ ${note.label} (${elapsedLabel}${speed})${milestone}`, 'success');
   updateTopbar();
   if (unlocked) {
     setTimeout(() => {
@@ -818,8 +856,15 @@ function masteryClass(entry) {
   return 'strong';
 }
 
-function renderStats() {
+// The stats grid keeps a stable DOM (built once, then patched in place) so
+// CSS transitions on the mastery bars and cell colors can animate between
+// updates instead of being destroyed by innerHTML rebuilds.
+const statsCells = new Map(); // note id -> { cell, labelEl, pctEl, fillEl }
+const nextUnlockEls = {}; // clef -> element showing next-unlock progress
+
+function buildStatsGrid() {
   statsGridEl.innerHTML = '';
+  statsCells.clear();
 
   [
     { clef: 'treble', title: 'Clé de Sol' },
@@ -828,7 +873,12 @@ function renderStats() {
     const wrap = document.createElement('div');
     const heading = document.createElement('div');
     heading.className = 'clef-row-title';
-    heading.textContent = title;
+    const titleEl = document.createElement('span');
+    titleEl.textContent = title;
+    const unlockEl = document.createElement('span');
+    unlockEl.className = 'next-unlock';
+    heading.append(titleEl, unlockEl);
+    nextUnlockEls[clef] = unlockEl;
     wrap.appendChild(heading);
 
     const row = document.createElement('div');
@@ -837,19 +887,60 @@ function renderStats() {
     NOTES.filter((n) => n.clef === clef)
       .sort((a, b) => a.order - b.order)
       .forEach((n) => {
-        const entry = state.progress[n.id];
         const cell = document.createElement('div');
-        cell.className = 'note-cell ' + masteryClass(entry);
-        const pct = Math.round(entry.ema * 100);
-        const pickPct = pickProbability(n);
-        cell.innerHTML = entry.unlocked
-          ? `${n.displayLabel}<div class="pick-pct">${pickPct}%</div><div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>`
-          : `🔒 ${n.displayLabel}`;
+        const labelEl = document.createElement('div');
+        labelEl.className = 'cell-label';
+        const pctEl = document.createElement('div');
+        pctEl.className = 'pick-pct';
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        const fillEl = document.createElement('div');
+        fillEl.className = 'bar-fill';
+        bar.appendChild(fillEl);
+        cell.append(labelEl, pctEl, bar);
         row.appendChild(cell);
+        statsCells.set(n.id, { cell, labelEl, pctEl, fillEl });
       });
 
     wrap.appendChild(row);
     statsGridEl.appendChild(wrap);
+  });
+}
+
+function renderStats() {
+  if (!statsCells.size) buildStatsGrid();
+  const pickPcts = pickProbabilities();
+
+  NOTES.forEach((n) => {
+    const entry = state.progress[n.id];
+    const { cell, labelEl, pctEl, fillEl } = statsCells.get(n.id);
+    cell.className = 'note-cell ' + masteryClass(entry);
+    if (!entry.unlocked) {
+      labelEl.textContent = `🔒 ${n.displayLabel}`;
+      return;
+    }
+    const learning = entry.attempts < NOVELTY_ATTEMPTS;
+    labelEl.textContent = (learning ? '✨ ' : '') + n.displayLabel;
+    pctEl.textContent = (pickPcts.get(n.id) || 0) + '%';
+    fillEl.style.width = Math.round(entry.ema * 100) + '%';
+  });
+
+  // Flash the cell of the note that was just answered, so the eye is drawn
+  // to where the progress bars and probabilities are changing.
+  if (state.lastAnswered) {
+    const rec = statsCells.get(state.lastAnswered.id);
+    if (rec) {
+      rec.cell.classList.remove('flash-good', 'flash-bad');
+      void rec.cell.offsetWidth; // restart the animation
+      rec.cell.classList.add(state.lastAnswered.correct ? 'flash-good' : 'flash-bad');
+    }
+  }
+
+  ['treble', 'bass'].forEach((clef) => {
+    const info = unlockGate(clef);
+    nextUnlockEls[clef].textContent = info
+      ? `Prochaine : ${info.next.displayLabel} · ${Math.round(info.progress * 100)}%`
+      : 'Toutes débloquées 🎉';
   });
 }
 
@@ -875,6 +966,9 @@ clefSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
     state.settings.clefMode = mode;
     saveState();
     updateClefSwitcherUI();
+    // The practice pool just changed, so the displayed pick probabilities
+    // are stale until re-rendered.
+    renderStats();
 
     if (state.autoMode) {
       stopListeningNow();
