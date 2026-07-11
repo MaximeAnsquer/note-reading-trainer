@@ -3,10 +3,17 @@
 const LETTER_TO_SOLFEGE = { C: 'do', D: 're', E: 'mi', F: 'fa', G: 'sol', A: 'la', B: 'si' };
 const DISPLAY_LABEL = { do: 'Do', re: 'Ré', mi: 'Mi', fa: 'Fa', sol: 'Sol', la: 'La', si: 'Si' };
 
-// Bottom-to-top note order for each clef, restricted to the 9 staff positions
-// (no ledger lines needed for this range).
-const TREBLE_KEYS = ['e/4', 'f/4', 'g/4', 'a/4', 'b/4', 'c/5', 'd/5', 'e/5', 'f/5'];
-const BASS_KEYS = ['g/2', 'a/2', 'b/2', 'c/3', 'd/3', 'e/3', 'f/3', 'g/3', 'a/3'];
+// Bottom-to-top note order for each clef: the 9 staff positions plus up to
+// two ledger lines on each side, which is the standard readable range for a
+// sight-reading trainer. This spans octaves 3-6 in treble and 2-4 in bass.
+const TREBLE_KEYS = [
+  'a/3', 'b/3', 'c/4', 'd/4', 'e/4', 'f/4', 'g/4', 'a/4', 'b/4',
+  'c/5', 'd/5', 'e/5', 'f/5', 'g/5', 'a/5', 'b/5', 'c/6',
+];
+const BASS_KEYS = [
+  'c/2', 'd/2', 'e/2', 'f/2', 'g/2', 'a/2', 'b/2', 'c/3', 'd/3',
+  'e/3', 'f/3', 'g/3', 'a/3', 'b/3', 'c/4', 'd/4', 'e/4',
+];
 
 // Words the speech recognizer commonly substitutes for each syllable, because
 // "do/ré/mi/fa" aren't ordinary French words and get auto-corrected toward
@@ -141,7 +148,9 @@ state.awaitingResult = false;
 state.silentEndStreak = 0;
 state.noteShownAt = Date.now();
 state.listeningRequested = false;
-state.noteQueue = [];
+state.noteBatch = [];
+state.batchDone = [];
+state.batchIndex = 0;
 
 // ---------- DOM ----------
 
@@ -172,8 +181,9 @@ const unlockedValueEl = document.getElementById('unlockedValue');
 
 // ---------- Staff rendering ----------
 
-const CURRENT_NOTE_STYLE = { fillStyle: '#2b2d42', strokeStyle: '#2b2d42' };
-const PREVIEW_NOTE_STYLE = { fillStyle: '#b7bbcf', strokeStyle: '#b7bbcf' };
+const CURRENT_NOTE_STYLE = { fillStyle: '#2b6cb0', strokeStyle: '#2b6cb0' };
+const DONE_NOTE_STYLE = { fillStyle: '#2f9e44', strokeStyle: '#2f9e44' };
+const PENDING_NOTE_STYLE = { fillStyle: '#b7bbcf', strokeStyle: '#b7bbcf' };
 const STAFF_SCALE = 1.45;
 
 function createScaledContext(unscaledWidth, unscaledHeight) {
@@ -186,12 +196,21 @@ function createScaledContext(unscaledWidth, unscaledHeight) {
   return context;
 }
 
-function renderQueue(queue) {
-  const clefsUsed = new Set(queue.map((n) => n.clef));
+// Blue = note currently being asked, green = already recognized this round,
+// grey = still waiting its turn in the batch.
+function styleForBatchIndex(i) {
+  if (i === state.batchIndex) return CURRENT_NOTE_STYLE;
+  if (state.batchDone[i]) return DONE_NOTE_STYLE;
+  return PENDING_NOTE_STYLE;
+}
+
+function renderBatch() {
+  const batch = state.noteBatch;
+  const clefsUsed = new Set(batch.map((n) => n.clef));
   if (clefsUsed.size > 1) {
-    renderGrandStaffQueue(queue);
+    renderGrandStaffBatch(batch);
   } else {
-    renderSingleStaffQueue(queue, queue[0].clef);
+    renderSingleStaffBatch(batch, batch[0].clef);
   }
 }
 
@@ -208,7 +227,7 @@ function pickProbability(note) {
   return Math.round((weight / totalWeight) * 100);
 }
 
-function renderSingleStaffQueue(queue, clef) {
+function renderSingleStaffBatch(batch, clef) {
   const VF = Vex.Flow;
   const context = createScaledContext(400, 190);
 
@@ -216,19 +235,19 @@ function renderSingleStaffQueue(queue, clef) {
   stave.addClef(clef);
   stave.setContext(context).draw();
 
-  const staveNotes = queue.map((note, i) => {
+  const staveNotes = batch.map((note, i) => {
     const sn = new VF.StaveNote({ keys: [note.key], duration: 'q', clef });
-    sn.setStyle(i === 0 ? CURRENT_NOTE_STYLE : PREVIEW_NOTE_STYLE);
+    sn.setStyle(styleForBatchIndex(i));
     return sn;
   });
 
-  const voice = new VF.Voice({ num_beats: queue.length, beat_value: 4 }).setStrict(false);
+  const voice = new VF.Voice({ num_beats: batch.length, beat_value: 4 }).setStrict(false);
   voice.addTickables(staveNotes);
   new VF.Formatter().joinVoices([voice]).format([voice], 300);
   voice.draw(context, stave);
 }
 
-function renderGrandStaffQueue(queue) {
+function renderGrandStaffBatch(batch) {
   const VF = Vex.Flow;
   const context = createScaledContext(400, 320);
 
@@ -252,8 +271,8 @@ function renderGrandStaffQueue(queue) {
   const trebleNotes = [];
   const bassNotes = [];
 
-  queue.forEach((note, i) => {
-    const style = i === 0 ? CURRENT_NOTE_STYLE : PREVIEW_NOTE_STYLE;
+  batch.forEach((note, i) => {
+    const style = styleForBatchIndex(i);
     if (note.clef === 'treble') {
       const sn = new VF.StaveNote({ keys: [note.key], duration: 'q', clef: 'treble' });
       sn.setStyle(style);
@@ -267,9 +286,9 @@ function renderGrandStaffQueue(queue) {
     }
   });
 
-  const trebleVoice = new VF.Voice({ num_beats: queue.length, beat_value: 4 }).setStrict(false);
+  const trebleVoice = new VF.Voice({ num_beats: batch.length, beat_value: 4 }).setStrict(false);
   trebleVoice.addTickables(trebleNotes);
-  const bassVoice = new VF.Voice({ num_beats: queue.length, beat_value: 4 }).setStrict(false);
+  const bassVoice = new VF.Voice({ num_beats: batch.length, beat_value: 4 }).setStrict(false);
   bassVoice.addTickables(bassNotes);
 
   new VF.Formatter().joinVoices([trebleVoice, bassVoice]).format([trebleVoice, bassVoice], 300);
@@ -707,29 +726,54 @@ function buildOnscreenKeyboard() {
 
 // ---------- Round flow ----------
 
-const QUEUE_SIZE = 4;
+const BATCH_SIZE = 4;
 
-function refillQueue() {
-  while (state.noteQueue.length < QUEUE_SIZE) {
-    const prevId =
-      state.noteQueue.length > 0 ? state.noteQueue[state.noteQueue.length - 1].id : state.lastNoteId;
-    state.noteQueue.push(pickNextNote(prevId));
-  }
-}
-
+// Draws a fresh batch of BATCH_SIZE notes that all stay visible on the staff
+// until every one of them has been recognized (see advanceAfterCorrect).
 function beginRound() {
-  refillQueue();
-  state.currentNote = state.noteQueue[0];
+  state.noteBatch = [];
+  let prevId = state.lastNoteId;
+  for (let i = 0; i < BATCH_SIZE; i++) {
+    const note = pickNextNote(prevId);
+    state.noteBatch.push(note);
+    prevId = note.id;
+  }
+  state.batchDone = state.noteBatch.map(() => false);
+  state.batchIndex = 0;
+  state.currentNote = state.noteBatch[0];
   state.noteShownAt = Date.now();
-  renderQueue(state.noteQueue);
+  renderBatch();
   setFeedback('', '');
   beginListening();
 }
 
-function advanceQueue() {
-  const finished = state.noteQueue.shift();
-  state.lastNoteId = finished.id;
-  refillQueue();
+// Marks the current note as recognized and moves focus to the next
+// not-yet-recognized note in the batch. Returns true once all of them have
+// been recognized, meaning it's time for a brand new batch.
+function advanceAfterCorrect() {
+  state.batchDone[state.batchIndex] = true;
+  state.lastNoteId = state.noteBatch[state.batchIndex].id;
+
+  const remaining = state.batchDone.map((done, i) => i).filter((i) => !state.batchDone[i]);
+  if (remaining.length === 0) return true;
+
+  state.batchIndex = remaining.find((i) => i > state.batchIndex) ?? remaining[0];
+  state.currentNote = state.noteBatch[state.batchIndex];
+  state.noteShownAt = Date.now();
+  return false;
+}
+
+// Moves focus to another not-yet-recognized note without marking the
+// current one done — it stays visible in the batch to come back to later.
+function skipCurrent() {
+  const others = state.noteBatch
+    .map((_, i) => i)
+    .filter((i) => i !== state.batchIndex && !state.batchDone[i]);
+  if (others.length === 0) return;
+
+  state.batchIndex = others.find((i) => i > state.batchIndex) ?? others[0];
+  state.currentNote = state.noteBatch[state.batchIndex];
+  state.noteShownAt = Date.now();
 }
 
 function setFeedback(text, kind) {
@@ -749,8 +793,14 @@ function onCorrect() {
       setFeedback(`🎉 Nouvelle note débloquée : ${unlocked.label} (${unlocked.clef === 'treble' ? 'clé de sol' : 'clé de fa'})`, 'success');
     }, 950);
   }
-  advanceQueue();
-  if (state.autoMode) setTimeout(() => beginRound(), unlocked ? 1900 : 900);
+  const batchComplete = advanceAfterCorrect();
+  renderBatch();
+
+  if (batchComplete) {
+    if (state.autoMode) setTimeout(() => beginRound(), unlocked ? 1900 : 900);
+  } else if (state.autoMode) {
+    setTimeout(() => beginListening(), unlocked ? 1900 : 900);
+  }
 }
 
 function onIncorrect(rawHeard, interpretedLabel) {
@@ -832,8 +882,7 @@ clefSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
 
     if (state.autoMode) {
       stopListeningNow();
-      // Notes already queued may belong to a clef we just excluded — start fresh.
-      state.noteQueue = [];
+      // The current batch may include notes from a clef we just excluded — start fresh.
       beginRound();
     }
   });
@@ -866,8 +915,9 @@ micBtn.addEventListener('click', () => startListening());
 
 skipBtn.addEventListener('click', () => {
   stopListeningNow();
-  advanceQueue();
-  beginRound();
+  skipCurrent();
+  renderBatch();
+  beginListening();
 });
 
 stopBtn.addEventListener('click', () => {
@@ -942,7 +992,9 @@ importFileInput.addEventListener('change', () => {
     });
     if (data.stats) Object.assign(state.stats, data.stats);
     if (data.settings) Object.assign(state.settings, data.settings);
-    state.noteQueue = [];
+    state.noteBatch = [];
+    state.batchDone = [];
+    state.batchIndex = 0;
 
     saveState();
     renderStats();

@@ -306,7 +306,7 @@ body {
 
 .clef-row {
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
   gap: 6px;
 }
 
@@ -378,7 +378,7 @@ body {
 .dot-strong { background: var(--success); }
 
 @media (max-width: 480px) {
-  .clef-row { grid-template-columns: repeat(9, minmax(0, 1fr)); }
+  .clef-row { grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); }
   .note-cell { font-size: 10px; padding: 6px 2px; }
   .topbar-stats { gap: 10px; }
 }
