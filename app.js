@@ -33,8 +33,8 @@ function midiNoteName(midiNumber) {
   return `${MIDI_DISPLAY_NAMES[pitchClass]}${toSubscript(octave)}`;
 }
 
-const MIN_ATTEMPTS_TO_UNLOCK = 3;
-const UNLOCK_THRESHOLD = 0.65;
+const MIN_ATTEMPTS_TO_UNLOCK = 2;
+const UNLOCK_THRESHOLD = 0.6;
 const EMA_ALPHA = 0.35;
 const STORAGE_KEY = 'noteReadingTrainerV1';
 
@@ -160,6 +160,8 @@ const unsupportedMsg = document.getElementById('unsupportedMsg');
 const midiUnsupportedMsg = document.getElementById('midiUnsupportedMsg');
 const midiDeviceStatusEl = document.getElementById('midiDeviceStatus');
 const listeningTextEl = document.getElementById('listeningText');
+const probRowEl = document.getElementById('probRow');
+const onscreenKeyboardEl = document.getElementById('onscreenKeyboard');
 const statsGridEl = document.getElementById('statsGrid');
 const clefSwitcherEl = document.getElementById('clefSwitcher');
 const inputModeSwitcherEl = document.getElementById('inputModeSwitcher');
@@ -192,6 +194,22 @@ function renderQueue(queue) {
   } else {
     renderSingleStaffQueue(queue, queue[0].clef);
   }
+  renderProbabilities(queue);
+}
+
+function renderProbabilities(queue) {
+  const pool = unlockedNotesForPractice();
+  const totalWeight = pool.reduce((sum, n) => sum + noteMasteryWeight(state.progress[n.id].ema), 0);
+
+  probRowEl.innerHTML = '';
+  queue.forEach((note, i) => {
+    const weight = noteMasteryWeight(state.progress[note.id].ema);
+    const pct = totalWeight > 0 ? Math.round((weight / totalWeight) * 100) : 0;
+    const chip = document.createElement('span');
+    chip.className = 'prob-chip' + (i === 0 ? ' current' : '');
+    chip.textContent = `${pct}%`;
+    probRowEl.appendChild(chip);
+  });
 }
 
 function renderSingleStaffQueue(queue, clef) {
@@ -275,6 +293,13 @@ function unlockedNotesForPractice() {
   );
 }
 
+// Sharpens the gap between weak and mastered notes; the small floor keeps
+// mastered notes reachable for review without letting their combined weight
+// (there can be many of them) drown out the few notes that still need work.
+function noteMasteryWeight(ema) {
+  return Math.pow(1 - ema, 4) + 0.03;
+}
+
 function pickNextNote(excludeId) {
   let candidates = unlockedNotesForPractice();
   // Hard-exclude the previous note so it never repeats back-to-back, unless
@@ -284,14 +309,7 @@ function pickNextNote(excludeId) {
     if (withoutPrevious.length > 0) candidates = withoutPrevious;
   }
 
-  const weights = candidates.map((n) => {
-    const ema = state.progress[n.id].ema;
-    // Sharpens the gap between weak and mastered notes further still; the
-    // small floor keeps mastered notes reachable for review without letting
-    // their combined weight (there can be many of them) drown out the few
-    // notes that still need work.
-    return Math.pow(1 - ema, 4) + 0.03;
-  });
+  const weights = candidates.map((n) => noteMasteryWeight(state.progress[n.id].ema));
   const total = weights.reduce((a, b) => a + b, 0);
   let r = Math.random() * total;
   for (let i = 0; i < candidates.length; i++) {
@@ -306,12 +324,15 @@ function maybeUnlockNext(clef) {
   const unlocked = seq.filter((n) => state.progress[n.id].unlocked);
   if (unlocked.length === seq.length) return null;
 
-  const allReady = unlocked.every((n) => {
-    const p = state.progress[n.id];
-    return p.attempts >= MIN_ATTEMPTS_TO_UNLOCK && p.ema >= UNLOCK_THRESHOLD;
-  });
+  // Only the most recently unlocked note needs to be mastered — requiring
+  // every previously-unlocked note to stay simultaneously "ready" made later
+  // notes (often the same letter on another octave) take longer and longer
+  // to reach as the practice pool grew.
+  const mostRecent = unlocked[unlocked.length - 1];
+  const p = state.progress[mostRecent.id];
+  const ready = p.attempts >= MIN_ATTEMPTS_TO_UNLOCK && p.ema >= UNLOCK_THRESHOLD;
 
-  if (allReady) {
+  if (ready) {
     const next = seq[unlocked.length];
     state.progress[next.id].unlocked = true;
     state.progress[next.id].ema = 0.35;
@@ -539,17 +560,14 @@ function attachMidiInputs() {
   updateMidiDeviceStatusUI();
 }
 
-function handleMidiMessage(event) {
-  const data = event.data;
-  const command = data[0] & 0xf0;
-  const velocity = data[2];
-  const isNoteOn = command === 0x90 && velocity > 0;
-  if (!isNoteOn) return;
-  if (state.settings.inputMode !== 'midi') return;
+// Shared by any "played a pitch" input source (MIDI hardware, on-screen
+// keyboard clicks): validates octave-agnostically against the displayed
+// note's letter, while progress still records against that exact note
+// instance (onCorrect/onIncorrect always act on state.currentNote).
+function handleNotePlayed(midiNumber) {
   if (!state.listeningRequested || !state.currentNote) return;
 
-  const midiNumber = data[1];
-  const pitchClass = midiNumber % 12;
+  const pitchClass = ((midiNumber % 12) + 12) % 12;
   const letter = MIDI_PITCH_CLASS_TO_LETTER[pitchClass];
   const label = midiNoteName(midiNumber);
 
@@ -558,6 +576,16 @@ function handleMidiMessage(event) {
   } else {
     onIncorrect(label, null);
   }
+}
+
+function handleMidiMessage(event) {
+  const data = event.data;
+  const command = data[0] & 0xf0;
+  const velocity = data[2];
+  const isNoteOn = command === 0x90 && velocity > 0;
+  if (!isNoteOn) return;
+  if (state.settings.inputMode !== 'midi') return;
+  handleNotePlayed(data[1]);
 }
 
 function updateMidiDeviceStatusUI() {
@@ -596,6 +624,8 @@ function beginListening() {
   if (state.settings.inputMode === 'midi') {
     setListening(true);
     ensureMidiReady();
+  } else if (state.settings.inputMode === 'keyboard') {
+    setListening(true);
   } else {
     startListening();
   }
@@ -603,32 +633,80 @@ function beginListening() {
 
 function stopListeningNow() {
   state.listeningRequested = false;
-  if (state.settings.inputMode === 'midi') {
-    setListening(false);
-  } else if (recognition) {
+  if (state.settings.inputMode === 'mic' && recognition) {
     try {
       recognition.abort();
     } catch (e) {}
+  } else {
+    setListening(false);
   }
 }
 
 function applyInputModeUI() {
   const mode = state.settings.inputMode;
   const isMic = mode === 'mic';
+  const isMidi = mode === 'midi';
+  const isKeyboard = mode === 'keyboard';
 
   inputModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.input === mode);
   });
 
   if (!isMic) micBtn.classList.add('hidden');
+  onscreenKeyboardEl.classList.toggle('hidden', !isKeyboard);
   unsupportedMsg.classList.toggle('hidden', !(isMic && !state.micSupported));
-  midiUnsupportedMsg.classList.toggle('hidden', !(!isMic && !state.midiSupported));
-  listeningTextEl.textContent = isMic ? "Je t'écoute…" : 'Joue la note sur ton clavier…';
+  midiUnsupportedMsg.classList.toggle('hidden', !(isMidi && !state.midiSupported));
+
+  if (isMic) listeningTextEl.textContent = "Je t'écoute…";
+  else if (isMidi) listeningTextEl.textContent = 'Joue la note sur ton clavier…';
+  else listeningTextEl.textContent = 'Clique la note demandée ci-dessous…';
 
   updateMidiDeviceStatusUI();
 
-  const supported = isMic ? state.micSupported : state.midiSupported;
+  const supported = isMic ? state.micSupported : isMidi ? state.midiSupported : true;
   startBtn.disabled = !supported;
+}
+
+// ---------- On-screen piano ----------
+
+const KEYBOARD_MIN_MIDI = 43; // G2
+const KEYBOARD_MAX_MIDI = 77; // F5
+const WHITE_PITCH_CLASSES = new Set([0, 2, 4, 5, 7, 9, 11]);
+
+function onKeyboardKeyClick(midiNumber) {
+  if (state.settings.inputMode !== 'keyboard') return;
+  handleNotePlayed(midiNumber);
+}
+
+function buildOnscreenKeyboard() {
+  onscreenKeyboardEl.innerHTML = '';
+
+  const allMidi = [];
+  for (let m = KEYBOARD_MIN_MIDI; m <= KEYBOARD_MAX_MIDI; m++) allMidi.push(m);
+  const whiteMidi = allMidi.filter((m) => WHITE_PITCH_CLASSES.has(m % 12));
+  const whiteWidthPct = 100 / whiteMidi.length;
+
+  whiteMidi.forEach((m) => {
+    const key = document.createElement('div');
+    key.className = 'key-white';
+    key.style.width = whiteWidthPct + '%';
+    key.addEventListener('click', () => onKeyboardKeyClick(m));
+    onscreenKeyboardEl.appendChild(key);
+  });
+
+  allMidi.forEach((m) => {
+    if (WHITE_PITCH_CLASSES.has(m % 12)) return;
+    const precedingWhiteCount = whiteMidi.filter((w) => w < m).length;
+    const key = document.createElement('div');
+    key.className = 'key-black';
+    key.style.left = `${precedingWhiteCount * whiteWidthPct - whiteWidthPct * 0.3}%`;
+    key.style.width = `${whiteWidthPct * 0.6}%`;
+    key.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onKeyboardKeyClick(m);
+    });
+    onscreenKeyboardEl.appendChild(key);
+  });
 }
 
 // ---------- Round flow ----------
@@ -682,7 +760,7 @@ function onCorrect() {
 function onIncorrect(rawHeard, interpretedLabel) {
   const note = state.currentNote;
   const interpretation = interpretedLabel && interpretedLabel !== rawHeard ? ` (compris : ${interpretedLabel})` : '';
-  const source = state.settings.inputMode === 'midi' ? 'Clavier a joué' : 'Micro a entendu';
+  const source = state.settings.inputMode === 'mic' ? 'Micro a entendu' : 'Clavier a joué';
   setFeedback(`❌ ${source} : "${rawHeard}"${interpretation} — note affichée : ${note.label}`, 'error');
   updateAfterAnswer(note, false);
   updateTopbar();
@@ -887,4 +965,5 @@ updateClefSwitcherUI();
 state.micSupported = setupRecognition();
 state.midiSupported = !!navigator.requestMIDIAccess;
 state.midiPermissionDenied = false;
+buildOnscreenKeyboard();
 applyInputModeUI();

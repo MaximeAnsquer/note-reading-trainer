@@ -225,6 +225,67 @@ body {
 .midi-status.connected { color: var(--success); }
 .midi-status.missing { color: var(--warn); }
 
+.prob-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: -6px;
+}
+
+.prob-chip {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 11px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.prob-chip.current {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.keyboard {
+  position: relative;
+  width: 100%;
+  max-width: 600px;
+  height: 130px;
+  margin-top: 8px;
+  display: flex;
+  user-select: none;
+}
+
+.key-white {
+  position: relative;
+  flex: 1 0 auto;
+  background: white;
+  border: 1px solid #c7c9d9;
+  border-radius: 0 0 6px 6px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.key-white:hover { background: #eef0fc; }
+.key-white:active { background: var(--primary); }
+
+.key-black {
+  position: absolute;
+  top: 0;
+  height: 62%;
+  background: #2b2d42;
+  border-radius: 0 0 4px 4px;
+  cursor: pointer;
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+.key-black:hover { background: #4a4d6a; }
+.key-black:active { background: var(--primary); }
+
 .hidden { display: none !important; }
 
 .stats-header {
