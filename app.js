@@ -181,8 +181,8 @@ const unlockedValueEl = document.getElementById('unlockedValue');
 
 // ---------- Staff rendering ----------
 
-const CURRENT_NOTE_STYLE = { fillStyle: '#2b6cb0', strokeStyle: '#2b6cb0' };
-const DONE_NOTE_STYLE = { fillStyle: '#2f9e44', strokeStyle: '#2f9e44' };
+const CURRENT_NOTE_STYLE = { fillStyle: '#4361ee', strokeStyle: '#4361ee' };
+const DONE_NOTE_STYLE = { fillStyle: '#2a9d8f', strokeStyle: '#2a9d8f' };
 const UPCOMING_NOTE_STYLE = { fillStyle: '#b7bbcf', strokeStyle: '#b7bbcf' };
 const STAFF_SCALE = 1.45;
 
