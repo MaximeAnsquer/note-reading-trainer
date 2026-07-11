@@ -3,10 +3,17 @@
 const LETTER_TO_SOLFEGE = { C: 'do', D: 're', E: 'mi', F: 'fa', G: 'sol', A: 'la', B: 'si' };
 const DISPLAY_LABEL = { do: 'Do', re: 'Ré', mi: 'Mi', fa: 'Fa', sol: 'Sol', la: 'La', si: 'Si' };
 
-// Bottom-to-top note order for each clef, restricted to the 9 staff positions
-// (no ledger lines needed for this range).
-const TREBLE_KEYS = ['e/4', 'f/4', 'g/4', 'a/4', 'b/4', 'c/5', 'd/5', 'e/5', 'f/5'];
-const BASS_KEYS = ['g/2', 'a/2', 'b/2', 'c/3', 'd/3', 'e/3', 'f/3', 'g/3', 'a/3'];
+// Bottom-to-top note order for each clef: the 9 staff positions plus up to
+// two ledger lines on each side, which is the standard readable range for a
+// sight-reading trainer. This spans octaves 3-6 in treble and 2-4 in bass.
+const TREBLE_KEYS = [
+  'a/3', 'b/3', 'c/4', 'd/4', 'e/4', 'f/4', 'g/4', 'a/4', 'b/4',
+  'c/5', 'd/5', 'e/5', 'f/5', 'g/5', 'a/5', 'b/5', 'c/6',
+];
+const BASS_KEYS = [
+  'c/2', 'd/2', 'e/2', 'f/2', 'g/2', 'a/2', 'b/2', 'c/3', 'd/3',
+  'e/3', 'f/3', 'g/3', 'a/3', 'b/3', 'c/4', 'd/4', 'e/4',
+];
 
 // Words the speech recognizer commonly substitutes for each syllable, because
 // "do/ré/mi/fa" aren't ordinary French words and get auto-corrected toward
