@@ -49,9 +49,30 @@ const STORAGE_KEY = 'noteReadingTrainerV1';
 // A correct answer only counts as full mastery if it was quick; a slow-but-
 // correct answer still counts (you did read the note right) but drags the
 // score down, since fluent sight-reading is as much about speed as accuracy.
-const FAST_ANSWER_MS = 1500;
-const SLOW_ANSWER_MS = 6000;
+// "Quick" is relative to the player's own recent pace, tracked separately per
+// input mode: speech recognition adds latency a MIDI keystroke doesn't have,
+// and a fixed bar would misjudge one mode or the other. The clamps keep the
+// bar sane for very fast players and beginners alike.
 const MIN_CORRECT_SCORE = 0.5;
+const BASELINE_ALPHA = 0.12;
+const DEFAULT_BASELINE_MS = 2500;
+const BASELINE_SAMPLE_CAP_MS = 15000;
+const FAST_MIN_MS = 900;
+const FAST_MAX_MS = 3000;
+const SLOW_FACTOR = 3;
+
+function speedBaselineMs() {
+  const baselines = state.stats.speedBaseline || {};
+  return baselines[state.settings.inputMode] || DEFAULT_BASELINE_MS;
+}
+
+function fastAnswerMs() {
+  return Math.min(FAST_MAX_MS, Math.max(FAST_MIN_MS, 0.8 * speedBaselineMs()));
+}
+
+function slowAnswerMs() {
+  return fastAnswerMs() * SLOW_FACTOR;
+}
 
 // A freshly unlocked note gets a large pick-weight bonus that fades over its
 // first attempts, so new material shows up immediately and repeatedly while
@@ -66,9 +87,11 @@ const STALENESS_BONUS = 0.12;
 
 function correctnessScore(correct, elapsedMs) {
   if (!correct) return 0;
-  if (elapsedMs <= FAST_ANSWER_MS) return 1;
-  if (elapsedMs >= SLOW_ANSWER_MS) return MIN_CORRECT_SCORE;
-  const t = (elapsedMs - FAST_ANSWER_MS) / (SLOW_ANSWER_MS - FAST_ANSWER_MS);
+  const fast = fastAnswerMs();
+  const slow = slowAnswerMs();
+  if (elapsedMs <= fast) return 1;
+  if (elapsedMs >= slow) return MIN_CORRECT_SCORE;
+  const t = (elapsedMs - fast) / (slow - fast);
   return 1 - t * (1 - MIN_CORRECT_SCORE);
 }
 
@@ -125,7 +148,7 @@ function loadState() {
   progress[trebleFirst.id].unlocked = true;
   progress[bassFirst.id].unlocked = true;
 
-  const stats = { totalAttempts: 0, totalCorrect: 0, streak: 0, bestStreak: 0 };
+  const stats = { totalAttempts: 0, totalCorrect: 0, streak: 0, bestStreak: 0, speedBaseline: {} };
   const settings = { clefMode: 'both', inputMode: 'midi' };
 
   if (saved && saved.progress) {
@@ -190,6 +213,7 @@ const inputModeSwitcherEl = document.getElementById('inputModeSwitcher');
 const streakValueEl = document.getElementById('streakValue');
 const bestStreakValueEl = document.getElementById('bestStreakValue');
 const scoreValueEl = document.getElementById('scoreValue');
+const avgSpeedValueEl = document.getElementById('avgSpeedValue');
 const unlockedValueEl = document.getElementById('unlockedValue');
 
 // ---------- Staff rendering ----------
@@ -396,6 +420,20 @@ function updateAfterAnswer(note, correct, elapsedMs) {
   state.stats.totalAttempts += 1;
   p.lastSeenAt = state.stats.totalAttempts;
   state.lastAnswered = { id: note.id, correct };
+
+  // Speed tracking, from correct answers only (a wrong answer's timing says
+  // nothing about reading fluency). The cap keeps a coffee break from
+  // wrecking the averages.
+  if (correct) {
+    const sample = Math.min(elapsedMs || 0, BASELINE_SAMPLE_CAP_MS);
+    if (sample > 0) {
+      if (!state.stats.speedBaseline) state.stats.speedBaseline = {};
+      const mode = state.settings.inputMode;
+      const prev = state.stats.speedBaseline[mode];
+      state.stats.speedBaseline[mode] = prev ? prev + BASELINE_ALPHA * (sample - prev) : sample;
+      p.avgMs = p.avgMs ? p.avgMs + 0.3 * (sample - p.avgMs) : sample;
+    }
+  }
   if (correct) {
     state.stats.totalCorrect += 1;
     state.stats.streak += 1;
@@ -819,7 +857,7 @@ function onCorrect() {
   const note = state.currentNote;
   const elapsedMs = Date.now() - (state.noteShownAt || Date.now());
   const elapsedLabel = (elapsedMs / 1000).toFixed(1) + 's';
-  const speed = elapsedMs <= FAST_ANSWER_MS ? ' ⚡' : elapsedMs >= SLOW_ANSWER_MS ? ' 🐢' : '';
+  const speed = elapsedMs <= fastAnswerMs() ? ' ⚡' : elapsedMs >= slowAnswerMs() ? ' 🐢' : '';
   const unlocked = updateAfterAnswer(note, true, elapsedMs);
   const streak = state.stats.streak;
   const milestone = streak > 0 && streak % 10 === 0 ? ` · 🔥 ${streak} d'affilée !` : '';
@@ -844,7 +882,15 @@ function onIncorrect(rawHeard, interpretedLabel) {
   setFeedback(`❌ ${source} : "${rawHeard}"${interpretation} — note affichée : ${note.label}`, 'error');
   updateAfterAnswer(note, false);
   updateTopbar();
-  if (state.autoMode) setTimeout(() => beginListening(), 1400);
+  // The feedback above reveals the right answer, so re-asking the same note
+  // immediately would score a trivial "success" and inflate its mastery.
+  // Move on instead: the missed note stays undone in the batch and comes back
+  // after the others, as a genuine test with fresh timing.
+  skipCurrent();
+  if (state.autoMode) {
+    if (state.settings.inputMode === 'mic') setTimeout(() => beginRound(), 700);
+    else beginRound();
+  }
 }
 
 // ---------- Stats UI ----------
@@ -923,6 +969,8 @@ function renderStats() {
     labelEl.textContent = (learning ? '✨ ' : '') + n.displayLabel;
     pctEl.textContent = (pickPcts.get(n.id) || 0) + '%';
     fillEl.style.width = Math.round(entry.ema * 100) + '%';
+    const avgPart = entry.avgMs ? ` · temps moyen ${(entry.avgMs / 1000).toFixed(1)}s` : '';
+    cell.title = `${n.displayLabel} — maîtrise ${Math.round(entry.ema * 100)}% · ${entry.attempts} essai${entry.attempts > 1 ? 's' : ''}${avgPart}`;
   });
 
   // Flash the cell of the note that was just answered, so the eye is drawn
@@ -948,6 +996,9 @@ function updateTopbar() {
   streakValueEl.textContent = state.stats.streak;
   bestStreakValueEl.textContent = state.stats.bestStreak;
   scoreValueEl.textContent = `${state.stats.totalCorrect} / ${state.stats.totalAttempts}`;
+  const baselines = state.stats.speedBaseline || {};
+  const baseline = baselines[state.settings.inputMode];
+  avgSpeedValueEl.textContent = baseline ? (baseline / 1000).toFixed(1) + 's' : '–';
   unlockedValueEl.textContent = `${unlockedNotes().length} / ${NOTES.length}`;
 }
 
@@ -989,6 +1040,8 @@ inputModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
     state.settings.inputMode = mode;
     saveState();
     applyInputModeUI();
+    // The speed stat in the topbar is per input mode.
+    updateTopbar();
     if (mode === 'midi') ensureMidiReady();
     if (state.autoMode) beginListening();
   });
