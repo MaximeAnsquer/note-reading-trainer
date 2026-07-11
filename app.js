@@ -141,7 +141,9 @@ state.awaitingResult = false;
 state.silentEndStreak = 0;
 state.noteShownAt = Date.now();
 state.listeningRequested = false;
-state.noteQueue = [];
+state.noteBatch = [];
+state.batchDone = [];
+state.batchIndex = 0;
 
 // ---------- DOM ----------
 
@@ -172,9 +174,18 @@ const unlockedValueEl = document.getElementById('unlockedValue');
 
 // ---------- Staff rendering ----------
 
-const CURRENT_NOTE_STYLE = { fillStyle: '#2b2d42', strokeStyle: '#2b2d42' };
-const PREVIEW_NOTE_STYLE = { fillStyle: '#b7bbcf', strokeStyle: '#b7bbcf' };
+const CURRENT_NOTE_STYLE = { fillStyle: '#4361ee', strokeStyle: '#4361ee' };
+const DONE_NOTE_STYLE = { fillStyle: '#2a9d8f', strokeStyle: '#2a9d8f' };
+const UPCOMING_NOTE_STYLE = { fillStyle: '#b7bbcf', strokeStyle: '#b7bbcf' };
 const STAFF_SCALE = 1.45;
+
+// Notes already recognized in this batch stay visible but dim to "done";
+// the note currently being asked is highlighted; the rest wait their turn.
+function styleForPosition(index, currentIndex, doneMask) {
+  if (doneMask[index]) return DONE_NOTE_STYLE;
+  if (index === currentIndex) return CURRENT_NOTE_STYLE;
+  return UPCOMING_NOTE_STYLE;
+}
 
 function createScaledContext(unscaledWidth, unscaledHeight) {
   const VF = Vex.Flow;
@@ -186,12 +197,12 @@ function createScaledContext(unscaledWidth, unscaledHeight) {
   return context;
 }
 
-function renderQueue(queue) {
-  const clefsUsed = new Set(queue.map((n) => n.clef));
+function renderBatch(batch, currentIndex, doneMask) {
+  const clefsUsed = new Set(batch.map((n) => n.clef));
   if (clefsUsed.size > 1) {
-    renderGrandStaffQueue(queue);
+    renderGrandStaffBatch(batch, currentIndex, doneMask);
   } else {
-    renderSingleStaffQueue(queue, queue[0].clef);
+    renderSingleStaffBatch(batch, currentIndex, doneMask, batch[0].clef);
   }
 }
 
@@ -208,7 +219,7 @@ function pickProbability(note) {
   return Math.round((weight / totalWeight) * 100);
 }
 
-function renderSingleStaffQueue(queue, clef) {
+function renderSingleStaffBatch(batch, currentIndex, doneMask, clef) {
   const VF = Vex.Flow;
   const context = createScaledContext(400, 190);
 
@@ -216,19 +227,19 @@ function renderSingleStaffQueue(queue, clef) {
   stave.addClef(clef);
   stave.setContext(context).draw();
 
-  const staveNotes = queue.map((note, i) => {
+  const staveNotes = batch.map((note, i) => {
     const sn = new VF.StaveNote({ keys: [note.key], duration: 'q', clef });
-    sn.setStyle(i === 0 ? CURRENT_NOTE_STYLE : PREVIEW_NOTE_STYLE);
+    sn.setStyle(styleForPosition(i, currentIndex, doneMask));
     return sn;
   });
 
-  const voice = new VF.Voice({ num_beats: queue.length, beat_value: 4 }).setStrict(false);
+  const voice = new VF.Voice({ num_beats: batch.length, beat_value: 4 }).setStrict(false);
   voice.addTickables(staveNotes);
   new VF.Formatter().joinVoices([voice]).format([voice], 300);
   voice.draw(context, stave);
 }
 
-function renderGrandStaffQueue(queue) {
+function renderGrandStaffBatch(batch, currentIndex, doneMask) {
   const VF = Vex.Flow;
   const context = createScaledContext(400, 320);
 
@@ -252,8 +263,8 @@ function renderGrandStaffQueue(queue) {
   const trebleNotes = [];
   const bassNotes = [];
 
-  queue.forEach((note, i) => {
-    const style = i === 0 ? CURRENT_NOTE_STYLE : PREVIEW_NOTE_STYLE;
+  batch.forEach((note, i) => {
+    const style = styleForPosition(i, currentIndex, doneMask);
     if (note.clef === 'treble') {
       const sn = new VF.StaveNote({ keys: [note.key], duration: 'q', clef: 'treble' });
       sn.setStyle(style);
@@ -267,9 +278,9 @@ function renderGrandStaffQueue(queue) {
     }
   });
 
-  const trebleVoice = new VF.Voice({ num_beats: queue.length, beat_value: 4 }).setStrict(false);
+  const trebleVoice = new VF.Voice({ num_beats: batch.length, beat_value: 4 }).setStrict(false);
   trebleVoice.addTickables(trebleNotes);
-  const bassVoice = new VF.Voice({ num_beats: queue.length, beat_value: 4 }).setStrict(false);
+  const bassVoice = new VF.Voice({ num_beats: batch.length, beat_value: 4 }).setStrict(false);
   bassVoice.addTickables(bassNotes);
 
   new VF.Formatter().joinVoices([trebleVoice, bassVoice]).format([trebleVoice, bassVoice], 300);
@@ -709,27 +720,51 @@ function buildOnscreenKeyboard() {
 
 const QUEUE_SIZE = 4;
 
-function refillQueue() {
-  while (state.noteQueue.length < QUEUE_SIZE) {
-    const prevId =
-      state.noteQueue.length > 0 ? state.noteQueue[state.noteQueue.length - 1].id : state.lastNoteId;
-    state.noteQueue.push(pickNextNote(prevId));
+function newBatch() {
+  const batch = [];
+  let prevId = state.lastNoteId;
+  for (let i = 0; i < QUEUE_SIZE; i++) {
+    const note = pickNextNote(prevId);
+    batch.push(note);
+    prevId = note.id;
   }
+  return batch;
+}
+
+// Cycles forward from `fromIndex` to the next position not yet recognized in
+// this batch, wrapping around; returns fromIndex itself if it's the only one
+// left, or -1 if the whole batch is done.
+function nextUndoneIndex(fromIndex) {
+  for (let step = 1; step <= state.batchDone.length; step++) {
+    const idx = (fromIndex + step) % state.batchDone.length;
+    if (!state.batchDone[idx]) return idx;
+  }
+  return -1;
 }
 
 function beginRound() {
-  refillQueue();
-  state.currentNote = state.noteQueue[0];
+  if (!state.noteBatch.length || state.batchDone.every(Boolean)) {
+    state.noteBatch = newBatch();
+    state.batchDone = state.noteBatch.map(() => false);
+    state.batchIndex = 0;
+  }
+  state.currentNote = state.noteBatch[state.batchIndex];
   state.noteShownAt = Date.now();
-  renderQueue(state.noteQueue);
+  renderBatch(state.noteBatch, state.batchIndex, state.batchDone);
   setFeedback('', '');
   beginListening();
 }
 
-function advanceQueue() {
-  const finished = state.noteQueue.shift();
-  state.lastNoteId = finished.id;
-  refillQueue();
+function advanceAfterCorrect() {
+  state.lastNoteId = state.noteBatch[state.batchIndex].id;
+  state.batchDone[state.batchIndex] = true;
+  const next = nextUndoneIndex(state.batchIndex);
+  if (next !== -1) state.batchIndex = next;
+}
+
+function skipCurrent() {
+  const next = nextUndoneIndex(state.batchIndex);
+  if (next !== -1) state.batchIndex = next;
 }
 
 function setFeedback(text, kind) {
@@ -749,7 +784,7 @@ function onCorrect() {
       setFeedback(`🎉 Nouvelle note débloquée : ${unlocked.label} (${unlocked.clef === 'treble' ? 'clé de sol' : 'clé de fa'})`, 'success');
     }, 950);
   }
-  advanceQueue();
+  advanceAfterCorrect();
   if (state.autoMode) setTimeout(() => beginRound(), unlocked ? 1900 : 900);
 }
 
@@ -833,7 +868,9 @@ clefSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
     if (state.autoMode) {
       stopListeningNow();
       // Notes already queued may belong to a clef we just excluded — start fresh.
-      state.noteQueue = [];
+      state.noteBatch = [];
+      state.batchDone = [];
+      state.batchIndex = 0;
       beginRound();
     }
   });
@@ -866,7 +903,7 @@ micBtn.addEventListener('click', () => startListening());
 
 skipBtn.addEventListener('click', () => {
   stopListeningNow();
-  advanceQueue();
+  skipCurrent();
   beginRound();
 });
 
@@ -942,7 +979,9 @@ importFileInput.addEventListener('change', () => {
     });
     if (data.stats) Object.assign(state.stats, data.stats);
     if (data.settings) Object.assign(state.settings, data.settings);
-    state.noteQueue = [];
+    state.noteBatch = [];
+    state.batchDone = [];
+    state.batchIndex = 0;
 
     saveState();
     renderStats();
