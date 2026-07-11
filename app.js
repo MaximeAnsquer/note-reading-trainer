@@ -160,7 +160,6 @@ const unsupportedMsg = document.getElementById('unsupportedMsg');
 const midiUnsupportedMsg = document.getElementById('midiUnsupportedMsg');
 const midiDeviceStatusEl = document.getElementById('midiDeviceStatus');
 const listeningTextEl = document.getElementById('listeningText');
-const probRowEl = document.getElementById('probRow');
 const onscreenKeyboardEl = document.getElementById('onscreenKeyboard');
 const statsGridEl = document.getElementById('statsGrid');
 const clefSwitcherEl = document.getElementById('clefSwitcher');
@@ -194,22 +193,19 @@ function renderQueue(queue) {
   } else {
     renderSingleStaffQueue(queue, queue[0].clef);
   }
-  renderProbabilities(queue);
 }
 
-function renderProbabilities(queue) {
+// Live probability that this note gets picked on the next draw, given the
+// current practice pool (respects clef mode) and everyone's mastery level.
+// Notes outside the active pool (locked, or excluded by the clef filter)
+// have no chance of being picked right now, hence 0%.
+function pickProbability(note) {
   const pool = unlockedNotesForPractice();
+  if (!pool.some((n) => n.id === note.id)) return 0;
   const totalWeight = pool.reduce((sum, n) => sum + noteMasteryWeight(state.progress[n.id].ema), 0);
-
-  probRowEl.innerHTML = '';
-  queue.forEach((note, i) => {
-    const weight = noteMasteryWeight(state.progress[note.id].ema);
-    const pct = totalWeight > 0 ? Math.round((weight / totalWeight) * 100) : 0;
-    const chip = document.createElement('span');
-    chip.className = 'prob-chip' + (i === 0 ? ' current' : '');
-    chip.textContent = `${pct}%`;
-    probRowEl.appendChild(chip);
-  });
+  if (totalWeight <= 0) return 0;
+  const weight = noteMasteryWeight(state.progress[note.id].ema);
+  return Math.round((weight / totalWeight) * 100);
 }
 
 function renderSingleStaffQueue(queue, clef) {
@@ -799,8 +795,9 @@ function renderStats() {
         const cell = document.createElement('div');
         cell.className = 'note-cell ' + masteryClass(entry);
         const pct = Math.round(entry.ema * 100);
+        const pickPct = pickProbability(n);
         cell.innerHTML = entry.unlocked
-          ? `${n.displayLabel}<div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>`
+          ? `${n.displayLabel}<div class="pick-pct">${pickPct}%</div><div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>`
           : `🔒 ${n.displayLabel}`;
         row.appendChild(cell);
       });

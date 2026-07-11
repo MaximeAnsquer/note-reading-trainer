@@ -225,30 +225,6 @@ body {
 .midi-status.connected { color: var(--success); }
 .midi-status.missing { color: var(--warn); }
 
-.prob-row {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  flex-wrap: wrap;
-  margin-top: -6px;
-}
-
-.prob-chip {
-  font-size: 12px;
-  font-weight: 700;
-  padding: 3px 11px;
-  border-radius: 999px;
-  background: var(--bg);
-  color: var(--muted);
-  border: 1px solid var(--border);
-}
-
-.prob-chip.current {
-  background: var(--primary);
-  color: white;
-  border-color: var(--primary);
-}
-
 .keyboard {
   position: relative;
   width: 100%;
@@ -343,6 +319,13 @@ body {
   color: white;
   background: var(--locked);
   position: relative;
+}
+
+.note-cell .pick-pct {
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.85;
+  margin-top: 1px;
 }
 
 .note-cell .bar {
