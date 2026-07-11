@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lecture de notes — Entraînement</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1>🎼 Lecture de notes</h1>
+      <div class="topbar-stats">
+        <div class="stat"><span class="stat-value" id="streakValue">0</span><span class="stat-label">série</span></div>
+        <div class="stat"><span class="stat-value" id="bestStreakValue">0</span><span class="stat-label">record</span></div>
+        <div class="stat"><span class="stat-value" id="scoreValue">0 / 0</span><span class="stat-label">score</span></div>
+        <div class="stat"><span class="stat-value" id="unlockedValue">2 / 18</span><span class="stat-label">notes débloquées</span></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="card score-card">
+        <div class="clef-switcher" id="clefSwitcher">
+          <button class="clef-btn" data-mode="treble">Clé de Sol</button>
+          <button class="clef-btn" data-mode="bass">Clé de Fa</button>
+          <button class="clef-btn active" data-mode="both">Les deux</button>
+        </div>
+        <div id="score" class="score-svg"></div>
+        <div id="listeningIndicator" class="listening-indicator hidden">
+          <span class="pulse-dot"></span> Je t'écoute…
+        </div>
+        <div id="feedback" class="feedback"></div>
+
+        <div class="controls">
+          <button id="startBtn" class="btn btn-primary">▶️ Commencer</button>
+          <button id="micBtn" class="btn btn-secondary hidden">🎤 Réessayer</button>
+          <button id="skipBtn" class="btn btn-ghost hidden">⏭ Passer</button>
+          <button id="stopBtn" class="btn btn-ghost hidden">⏸ Pause</button>
+        </div>
+        <p id="unsupportedMsg" class="unsupported hidden">
+          La reconnaissance vocale n'est pas disponible dans ce navigateur. Utilise Google Chrome sur ordinateur.
+        </p>
+      </section>
+
+      <section class="card stats-card">
+        <div class="stats-header">
+          <h2>Progression par note</h2>
+          <div class="stats-header-actions">
+            <button id="exportBtn" class="btn btn-ghost btn-small">⬇️ Exporter</button>
+            <button id="importBtn" class="btn btn-ghost btn-small">⬆️ Importer</button>
+            <input type="file" id="importFile" accept="application/json" class="hidden" />
+            <button id="resetBtn" class="btn btn-danger-ghost">Réinitialiser</button>
+          </div>
+        </div>
+        <div id="statsGrid" class="stats-grid"></div>
+        <div class="legend">
+          <span><i class="dot dot-locked"></i> Pas encore débloquée</span>
+          <span><i class="dot dot-weak"></i> À travailler</span>
+          <span><i class="dot dot-mid"></i> En progrès</span>
+          <span><i class="dot dot-strong"></i> Maîtrisée</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
+  <script src="app.js?v=19"></script>
+</body>
+</html>
