@@ -25,9 +25,14 @@
           <button class="clef-btn" data-mode="bass">Clé de Fa</button>
           <button class="clef-btn active" data-mode="both">Les deux</button>
         </div>
+        <div class="clef-switcher" id="inputModeSwitcher">
+          <button class="clef-btn" data-input="mic">🎤 Micro</button>
+          <button class="clef-btn active" data-input="midi">🎹 Clavier MIDI</button>
+        </div>
         <div id="score" class="score-svg"></div>
+        <div id="midiDeviceStatus" class="midi-status hidden"></div>
         <div id="listeningIndicator" class="listening-indicator hidden">
-          <span class="pulse-dot"></span> Je t'écoute…
+          <span class="pulse-dot"></span> <span id="listeningText">Je t'écoute…</span>
         </div>
         <div id="feedback" class="feedback"></div>
 
@@ -39,6 +44,9 @@
         </div>
         <p id="unsupportedMsg" class="unsupported hidden">
           La reconnaissance vocale n'est pas disponible dans ce navigateur. Utilise Google Chrome sur ordinateur.
+        </p>
+        <p id="midiUnsupportedMsg" class="unsupported hidden">
+          L'API MIDI n'est pas disponible dans ce navigateur. Utilise Google Chrome ou Edge sur ordinateur.
         </p>
       </section>
 
@@ -64,6 +72,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>

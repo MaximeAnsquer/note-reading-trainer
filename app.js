@@ -21,8 +21,20 @@ const SYNONYMS = {
   si: ['si', 'scie', 'ci', 'cis', 'sit', 'sy', 'six', 'sil'],
 };
 
-const MIN_ATTEMPTS_TO_UNLOCK = 4;
-const UNLOCK_THRESHOLD = 0.75;
+// MIDI note number 60 = C4 (middle C) by convention; pitch class is the
+// number mod 12. Only natural (white-key) pitch classes map to a letter —
+// sharps/flats never match, since the staff notes we teach are all naturals.
+const MIDI_PITCH_CLASS_TO_LETTER = { 0: 'C', 2: 'D', 4: 'E', 5: 'F', 7: 'G', 9: 'A', 11: 'B' };
+const MIDI_DISPLAY_NAMES = ['Do', 'Do♯', 'Ré', 'Ré♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si'];
+
+function midiNoteName(midiNumber) {
+  const pitchClass = ((midiNumber % 12) + 12) % 12;
+  const octave = Math.floor(midiNumber / 12) - 1;
+  return `${MIDI_DISPLAY_NAMES[pitchClass]}${toSubscript(octave)}`;
+}
+
+const MIN_ATTEMPTS_TO_UNLOCK = 3;
+const UNLOCK_THRESHOLD = 0.65;
 const EMA_ALPHA = 0.35;
 const STORAGE_KEY = 'noteReadingTrainerV1';
 
@@ -95,7 +107,7 @@ function loadState() {
   progress[bassFirst.id].unlocked = true;
 
   const stats = { totalAttempts: 0, totalCorrect: 0, streak: 0, bestStreak: 0 };
-  const settings = { clefMode: 'both' };
+  const settings = { clefMode: 'both', inputMode: 'midi' };
 
   if (saved && saved.progress) {
     Object.keys(progress).forEach((id) => {
@@ -145,8 +157,12 @@ const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
 const importFileInput = document.getElementById('importFile');
 const unsupportedMsg = document.getElementById('unsupportedMsg');
+const midiUnsupportedMsg = document.getElementById('midiUnsupportedMsg');
+const midiDeviceStatusEl = document.getElementById('midiDeviceStatus');
+const listeningTextEl = document.getElementById('listeningText');
 const statsGridEl = document.getElementById('statsGrid');
 const clefSwitcherEl = document.getElementById('clefSwitcher');
+const inputModeSwitcherEl = document.getElementById('inputModeSwitcher');
 
 const streakValueEl = document.getElementById('streakValue');
 const bestStreakValueEl = document.getElementById('bestStreakValue');
@@ -270,11 +286,11 @@ function pickNextNote(excludeId) {
 
   const weights = candidates.map((n) => {
     const ema = state.progress[n.id].ema;
-    // Cubing sharpens the gap between weak and mastered notes; the small floor
-    // keeps mastered notes reachable for review without letting their combined
-    // weight (there can be many of them) drown out the few notes that still
-    // need work.
-    return Math.pow(1 - ema, 3) + 0.05;
+    // Sharpens the gap between weak and mastered notes further still; the
+    // small floor keeps mastered notes reachable for review without letting
+    // their combined weight (there can be many of them) drown out the few
+    // notes that still need work.
+    return Math.pow(1 - ema, 4) + 0.03;
   });
   const total = weights.reduce((a, b) => a + b, 0);
   let r = Math.random() * total;
@@ -373,8 +389,6 @@ function findSpokenSolfege(words) {
 
 function setupRecognition() {
   if (!SpeechRecognitionCtor) {
-    unsupportedMsg.classList.remove('hidden');
-    startBtn.classList.add('hidden');
     return false;
   }
   recognition = new SpeechRecognitionCtor();
@@ -494,6 +508,129 @@ function setListening(active) {
   listeningEl.classList.toggle('hidden', !active);
 }
 
+// ---------- MIDI input ----------
+
+let midiAccess = null;
+
+function ensureMidiReady() {
+  if (!state.midiSupported) return Promise.resolve(false);
+  if (midiAccess) return Promise.resolve(true);
+  return navigator
+    .requestMIDIAccess()
+    .then((access) => {
+      midiAccess = access;
+      attachMidiInputs();
+      midiAccess.onstatechange = attachMidiInputs;
+      applyInputModeUI();
+      return true;
+    })
+    .catch(() => {
+      state.midiPermissionDenied = true;
+      applyInputModeUI();
+      return false;
+    });
+}
+
+function attachMidiInputs() {
+  if (!midiAccess) return;
+  for (const input of midiAccess.inputs.values()) {
+    input.onmidimessage = handleMidiMessage;
+  }
+  updateMidiDeviceStatusUI();
+}
+
+function handleMidiMessage(event) {
+  const data = event.data;
+  const command = data[0] & 0xf0;
+  const velocity = data[2];
+  const isNoteOn = command === 0x90 && velocity > 0;
+  if (!isNoteOn) return;
+  if (state.settings.inputMode !== 'midi') return;
+  if (!state.listeningRequested || !state.currentNote) return;
+
+  const midiNumber = data[1];
+  const pitchClass = midiNumber % 12;
+  const letter = MIDI_PITCH_CLASS_TO_LETTER[pitchClass];
+  const label = midiNoteName(midiNumber);
+
+  if (letter && letter === state.currentNote.letter) {
+    onCorrect();
+  } else {
+    onIncorrect(label, null);
+  }
+}
+
+function updateMidiDeviceStatusUI() {
+  if (state.settings.inputMode !== 'midi' || !state.midiSupported) {
+    midiDeviceStatusEl.classList.add('hidden');
+    return;
+  }
+  midiDeviceStatusEl.classList.remove('hidden');
+
+  if (state.midiPermissionDenied) {
+    midiDeviceStatusEl.className = 'midi-status missing';
+    midiDeviceStatusEl.textContent =
+      "❌ Accès MIDI refusé. Autorise-le dans les réglages du site puis recharge la page.";
+    return;
+  }
+  if (!midiAccess) {
+    midiDeviceStatusEl.className = 'midi-status missing';
+    midiDeviceStatusEl.textContent = "🎹 En attente d'autorisation MIDI…";
+    return;
+  }
+
+  const inputs = [...midiAccess.inputs.values()];
+  if (inputs.length === 0) {
+    midiDeviceStatusEl.className = 'midi-status missing';
+    midiDeviceStatusEl.textContent = '⚠️ Aucun clavier MIDI détecté — branche-le et réessaie.';
+  } else {
+    midiDeviceStatusEl.className = 'midi-status connected';
+    midiDeviceStatusEl.textContent = `✅ Clavier connecté : ${inputs.map((i) => i.name).join(', ')}`;
+  }
+}
+
+// ---------- Input mode (mic vs MIDI) ----------
+
+function beginListening() {
+  state.listeningRequested = true;
+  if (state.settings.inputMode === 'midi') {
+    setListening(true);
+    ensureMidiReady();
+  } else {
+    startListening();
+  }
+}
+
+function stopListeningNow() {
+  state.listeningRequested = false;
+  if (state.settings.inputMode === 'midi') {
+    setListening(false);
+  } else if (recognition) {
+    try {
+      recognition.abort();
+    } catch (e) {}
+  }
+}
+
+function applyInputModeUI() {
+  const mode = state.settings.inputMode;
+  const isMic = mode === 'mic';
+
+  inputModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.input === mode);
+  });
+
+  if (!isMic) micBtn.classList.add('hidden');
+  unsupportedMsg.classList.toggle('hidden', !(isMic && !state.micSupported));
+  midiUnsupportedMsg.classList.toggle('hidden', !(!isMic && !state.midiSupported));
+  listeningTextEl.textContent = isMic ? "Je t'écoute…" : 'Joue la note sur ton clavier…';
+
+  updateMidiDeviceStatusUI();
+
+  const supported = isMic ? state.micSupported : state.midiSupported;
+  startBtn.disabled = !supported;
+}
+
 // ---------- Round flow ----------
 
 const QUEUE_SIZE = 4;
@@ -512,7 +649,7 @@ function beginRound() {
   state.noteShownAt = Date.now();
   renderQueue(state.noteQueue);
   setFeedback('', '');
-  startListening();
+  beginListening();
 }
 
 function advanceQueue() {
@@ -545,10 +682,11 @@ function onCorrect() {
 function onIncorrect(rawHeard, interpretedLabel) {
   const note = state.currentNote;
   const interpretation = interpretedLabel && interpretedLabel !== rawHeard ? ` (compris : ${interpretedLabel})` : '';
-  setFeedback(`❌ Micro a entendu : "${rawHeard}"${interpretation} — note affichée : ${note.label}`, 'error');
+  const source = state.settings.inputMode === 'midi' ? 'Clavier a joué' : 'Micro a entendu';
+  setFeedback(`❌ ${source} : "${rawHeard}"${interpretation} — note affichée : ${note.label}`, 'error');
   updateAfterAnswer(note, false);
   updateTopbar();
-  if (state.autoMode) setTimeout(() => startListening(), 1400);
+  if (state.autoMode) setTimeout(() => beginListening(), 1400);
 }
 
 // ---------- Stats UI ----------
@@ -618,13 +756,24 @@ clefSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
     updateClefSwitcherUI();
 
     if (state.autoMode) {
-      if (recognition) {
-        try { recognition.abort(); } catch (e) {}
-      }
+      stopListeningNow();
       // Notes already queued may belong to a clef we just excluded — start fresh.
       state.noteQueue = [];
       beginRound();
     }
+  });
+});
+
+inputModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const mode = btn.dataset.input;
+    if (mode === state.settings.inputMode) return;
+    stopListeningNow();
+    state.settings.inputMode = mode;
+    saveState();
+    applyInputModeUI();
+    if (mode === 'midi') ensureMidiReady();
+    if (state.autoMode) beginListening();
   });
 });
 
@@ -641,20 +790,14 @@ startBtn.addEventListener('click', () => {
 micBtn.addEventListener('click', () => startListening());
 
 skipBtn.addEventListener('click', () => {
-  if (recognition) {
-    try { recognition.abort(); } catch (e) {}
-  }
+  stopListeningNow();
   advanceQueue();
   beginRound();
 });
 
 stopBtn.addEventListener('click', () => {
   state.autoMode = false;
-  state.listeningRequested = false;
-  if (recognition) {
-    try { recognition.abort(); } catch (e) {}
-  }
-  setListening(false);
+  stopListeningNow();
   setFeedback('En pause. Clique sur Reprendre pour continuer.', '');
   stopBtn.classList.add('hidden');
   skipBtn.classList.add('hidden');
@@ -741,6 +884,7 @@ importFileInput.addEventListener('change', () => {
 renderStats();
 updateTopbar();
 updateClefSwitcherUI();
-if (!setupRecognition()) {
-  // unsupported message already shown
-}
+state.micSupported = setupRecognition();
+state.midiSupported = !!navigator.requestMIDIAccess;
+state.midiPermissionDenied = false;
+applyInputModeUI();

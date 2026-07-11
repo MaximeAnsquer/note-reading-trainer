@@ -179,6 +179,11 @@ body {
 
 .btn:active { transform: scale(0.97); }
 
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .btn-primary {
   background: var(--primary);
   color: white;
@@ -209,6 +214,16 @@ body {
   font-size: 13px;
   margin-top: 14px;
 }
+
+.midi-status {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+.midi-status.connected { color: var(--success); }
+.midi-status.missing { color: var(--warn); }
 
 .hidden { display: none !important; }
 
