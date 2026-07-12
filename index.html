@@ -31,6 +31,11 @@
           <button class="clef-btn active" data-input="midi">🎹 Clavier MIDI</button>
           <button class="clef-btn" data-input="keyboard">🖱️ Piano à l'écran</button>
         </div>
+        <div class="clef-switcher" id="practiceModeSwitcher">
+          <button class="clef-btn active" data-practice="normal">📚 Progression</button>
+          <button class="clef-btn" data-practice="review">🎯 Révision</button>
+        </div>
+        <p id="reviewHint" class="review-hint hidden"></p>
         <div id="score" class="score-svg"></div>
         <div id="onscreenKeyboard" class="keyboard hidden"></div>
         <div id="midiDeviceStatus" class="midi-status hidden"></div>
@@ -94,6 +99,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
-  <script src="app.js?v=29"></script>
+  <script src="app.js?v=30"></script>
 </body>
 </html>

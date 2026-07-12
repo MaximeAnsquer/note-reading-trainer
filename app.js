@@ -198,6 +198,9 @@ state.noteBatch = [];
 state.batchDone = [];
 state.batchIndex = 0;
 state.lastAnswered = null;
+// Session-only: not persisted, so a forgotten review session can't silently
+// block curriculum progress across visits.
+state.reviewMode = false;
 
 // ---------- DOM ----------
 
@@ -266,7 +269,7 @@ function renderBatch(batch, currentIndex, doneMask) {
 // actually uses. Notes outside the active pool (locked, or excluded by the
 // clef filter) are absent from the map and display as 0%.
 function pickProbabilities() {
-  const pool = unlockedNotesForPractice();
+  const pool = practicePool();
   const weights = pool.map((n) => noteWeight(n, pool.length));
   const total = weights.reduce((a, b) => a + b, 0);
   const map = new Map();
@@ -357,6 +360,21 @@ function unlockedNotesForPractice() {
   );
 }
 
+// In review mode the pool narrows to the notes that still need work: those
+// below the "mastered" bar. When fewer than REVIEW_MIN_POOL qualify, the
+// weakest mastered notes top the pool up so the drill keeps some variety
+// (and the mode stays useful even when everything is green).
+const REVIEW_EMA_THRESHOLD = 0.7;
+const REVIEW_MIN_POOL = 3;
+
+function practicePool() {
+  const base = unlockedNotesForPractice();
+  if (!state.reviewMode) return base;
+  const sorted = [...base].sort((a, b) => state.progress[a.id].ema - state.progress[b.id].ema);
+  const weak = sorted.filter((n) => state.progress[n.id].ema < REVIEW_EMA_THRESHOLD);
+  return weak.length >= REVIEW_MIN_POOL ? weak : sorted.slice(0, Math.min(REVIEW_MIN_POOL, sorted.length));
+}
+
 // Pick weight combines three pressures:
 // - mastery gap: sharply favors notes still being missed; the small floor
 //   keeps mastered notes reachable without letting their combined weight
@@ -376,7 +394,7 @@ function noteWeight(note, poolSize) {
 }
 
 function pickNextNote(excludeId) {
-  let candidates = unlockedNotesForPractice();
+  let candidates = practicePool();
   // Hard-exclude the previous note so it never repeats back-to-back, unless
   // it's genuinely the only note available yet.
   if (excludeId && candidates.length > 1) {
@@ -487,7 +505,9 @@ function updateAfterAnswer(note, correct, elapsedMs) {
     state.stats.streak = 0;
   }
 
-  const unlocked = maybeUnlockNext(note.clef);
+  // Review mode consolidates what's already unlocked; advancing through the
+  // curriculum is what normal mode is for.
+  const unlocked = state.reviewMode ? null : maybeUnlockNext(note.clef);
 
   // Daily journal entry (written after the unlock so the level snapshot
   // includes the note that was just added).
@@ -1021,11 +1041,13 @@ function buildStatsGrid() {
 function renderStats() {
   if (!statsCells.size) buildStatsGrid();
   const pickPcts = pickProbabilities();
+  const reviewIds = state.reviewMode ? new Set(practicePool().map((n) => n.id)) : null;
 
   NOTES.forEach((n) => {
     const entry = state.progress[n.id];
     const { cell, labelEl, pctEl, fillEl } = statsCells.get(n.id);
     cell.className = 'note-cell ' + masteryClass(entry);
+    if (reviewIds && reviewIds.has(n.id)) cell.classList.add('in-review');
     if (!entry.unlocked) {
       labelEl.textContent = `🔒 ${n.displayLabel}`;
       return;
@@ -1051,10 +1073,15 @@ function renderStats() {
 
   ['treble', 'bass'].forEach((clef) => {
     const info = unlockGate(clef);
-    nextUnlockEls[clef].textContent = info
-      ? `Prochaine : ${info.next.displayLabel} · ${Math.round(info.progress * 100)}%`
-      : 'Toutes débloquées 🎉';
+    nextUnlockEls[clef].textContent = state.reviewMode
+      ? 'Déblocages en pause (révision)'
+      : info
+        ? `Prochaine : ${info.next.displayLabel} · ${Math.round(info.progress * 100)}%`
+        : 'Toutes débloquées 🎉';
   });
+
+  // The review pool shifts as notes get consolidated; keep the hint fresh.
+  if (state.reviewMode) applyPracticeModeUI();
 }
 
 function updateTopbar() {
@@ -1314,6 +1341,46 @@ inputModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
     updateTopbar();
     if (mode === 'midi') ensureMidiReady();
     if (state.autoMode) beginListening();
+  });
+});
+
+// ---------- Practice mode (progression vs review) ----------
+
+const practiceModeSwitcherEl = document.getElementById('practiceModeSwitcher');
+const reviewHintEl = document.getElementById('reviewHint');
+
+function applyPracticeModeUI() {
+  practiceModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    btn.classList.toggle('active', (btn.dataset.practice === 'review') === state.reviewMode);
+  });
+  if (state.reviewMode) {
+    const pool = practicePool();
+    reviewHintEl.textContent =
+      `🎯 Révision : uniquement tes ${pool.length} notes les plus fragiles (${pool
+        .map((n) => n.displayLabel)
+        .join(', ')}) — pas de nouveaux déblocages.`;
+    reviewHintEl.classList.remove('hidden');
+  } else {
+    reviewHintEl.classList.add('hidden');
+  }
+}
+
+practiceModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const wantsReview = btn.dataset.practice === 'review';
+    if (wantsReview === state.reviewMode) return;
+    state.reviewMode = wantsReview;
+    applyPracticeModeUI();
+    // Pool changed: displayed probabilities and review highlights are stale,
+    // and any queued batch may contain notes now outside the pool.
+    renderStats();
+    if (state.autoMode) {
+      stopListeningNow();
+      state.noteBatch = [];
+      state.batchDone = [];
+      state.batchIndex = 0;
+      beginRound();
+    }
   });
 });
 

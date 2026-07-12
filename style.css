@@ -143,6 +143,18 @@ body {
   color: white;
 }
 
+#practiceModeSwitcher .clef-btn.active[data-practice="review"] {
+  background: #d97706;
+}
+
+.review-hint {
+  font-size: 12px;
+  color: #d97706;
+  font-weight: 600;
+  margin: -6px 0 10px;
+  text-align: center;
+}
+
 @keyframes pulse {
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.4); opacity: 0.5; }
@@ -337,6 +349,11 @@ body {
 
 .note-cell.flash-good { animation: flashGood 0.7s ease; }
 .note-cell.flash-bad { animation: flashBad 0.7s ease; }
+
+.note-cell.in-review {
+  outline: 2px solid var(--primary-dark);
+  outline-offset: 1px;
+}
 
 @keyframes flashGood {
   0% { box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.9); transform: scale(1.08); }
