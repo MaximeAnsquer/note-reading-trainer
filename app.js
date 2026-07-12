@@ -1420,7 +1420,6 @@ function renderSessionTimer() {
     return;
   }
   sessionTimerEl.textContent = `⏱️ ${formatCountdown(state.sessionRemainingMs)} restantes`;
-  sessionTimerEl.classList.toggle('session-timer-low', state.sessionRemainingMs <= 30000);
   sessionTimerEl.classList.remove('hidden');
 }
 
