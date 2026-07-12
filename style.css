@@ -134,6 +134,10 @@ body {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
+.clef-btn:disabled {
+  cursor: not-allowed;
+}
+
 .clef-btn:hover {
   color: var(--ink);
 }
@@ -153,6 +157,42 @@ body {
   font-weight: 600;
   margin: -6px 0 10px;
   text-align: center;
+}
+
+#timerSwitcher.disabled {
+  opacity: 0.55;
+}
+
+.session-timer {
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-top: 4px;
+}
+
+.session-timer.session-timer-low {
+  color: var(--error);
+  animation: pulse 1s infinite;
+}
+
+.session-summary {
+  background: #eef0fc;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-top: 10px;
+  text-align: center;
+}
+
+.session-summary-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.session-summary .today-chips {
+  justify-content: center;
+  margin-bottom: 0;
 }
 
 @keyframes pulse {

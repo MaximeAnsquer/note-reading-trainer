@@ -36,13 +36,22 @@
           <button class="clef-btn" data-practice="review">🎯 Révision</button>
         </div>
         <p id="reviewHint" class="review-hint hidden"></p>
+        <div class="clef-switcher" id="timerSwitcher">
+          <button class="clef-btn active" data-minutes="0">♾️ Libre</button>
+          <button class="clef-btn" data-minutes="5">5 min</button>
+          <button class="clef-btn" data-minutes="10">10 min</button>
+          <button class="clef-btn" data-minutes="15">15 min</button>
+          <button class="clef-btn" data-minutes="20">20 min</button>
+        </div>
         <div id="score" class="score-svg"></div>
         <div id="onscreenKeyboard" class="keyboard hidden"></div>
         <div id="midiDeviceStatus" class="midi-status hidden"></div>
         <div id="listeningIndicator" class="listening-indicator hidden">
           <span class="pulse-dot"></span> <span id="listeningText">Je t'écoute…</span>
         </div>
+        <div id="sessionTimer" class="session-timer hidden"></div>
         <div id="feedback" class="feedback"></div>
+        <div id="sessionSummary" class="session-summary hidden"></div>
 
         <div class="controls">
           <button id="startBtn" class="btn btn-primary">▶️ Commencer</button>
@@ -99,6 +108,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
-  <script src="app.js?v=30"></script>
+  <script src="app.js?v=31"></script>
 </body>
 </html>

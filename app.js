@@ -149,7 +149,7 @@ function loadState() {
   progress[bassFirst.id].unlocked = true;
 
   const stats = { totalAttempts: 0, totalCorrect: 0, streak: 0, bestStreak: 0, speedBaseline: {} };
-  const settings = { clefMode: 'both', inputMode: 'midi' };
+  const settings = { clefMode: 'both', inputMode: 'midi', sessionMinutes: 0 };
 
   if (saved && saved.progress) {
     Object.keys(progress).forEach((id) => {
@@ -201,6 +201,9 @@ state.lastAnswered = null;
 // Session-only: not persisted, so a forgotten review session can't silently
 // block curriculum progress across visits.
 state.reviewMode = false;
+state.sessionEndAt = null;
+state.sessionTicker = null;
+state.sessionStats = null;
 
 // ---------- DOM ----------
 
@@ -1384,9 +1387,144 @@ practiceModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
   });
 });
 
+// ---------- Session timer (time-boxing) ----------
+
+const timerSwitcherEl = document.getElementById('timerSwitcher');
+const sessionTimerEl = document.getElementById('sessionTimer');
+const sessionSummaryEl = document.getElementById('sessionSummary');
+
+function applyTimerSwitcherUI() {
+  timerSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    btn.classList.toggle('active', Number(btn.dataset.minutes) === state.settings.sessionMinutes);
+  });
+  // Locked while a countdown is running or paused mid-flight, so switching
+  // horses mid-session can't silently invalidate the summary snapshot. Free
+  // to change while idle, or paused in "Libre" mode (nothing to disrupt).
+  const locked = state.autoMode || state.sessionRemainingMs != null;
+  timerSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    btn.disabled = locked;
+  });
+  timerSwitcherEl.classList.toggle('disabled', locked);
+}
+
+function formatCountdown(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function renderSessionTimer() {
+  if (state.sessionRemainingMs == null) {
+    sessionTimerEl.classList.add('hidden');
+    return;
+  }
+  sessionTimerEl.textContent = `⏱️ ${formatCountdown(state.sessionRemainingMs)} restantes`;
+  sessionTimerEl.classList.toggle('session-timer-low', state.sessionRemainingMs <= 30000);
+  sessionTimerEl.classList.remove('hidden');
+}
+
+function tickSessionTimer() {
+  state.sessionRemainingMs = Math.max(0, state.sessionEndAt - Date.now());
+  renderSessionTimer();
+  if (state.sessionRemainingMs <= 0) endSessionByTimeout();
+}
+
+function resumeSessionTimer() {
+  if (state.sessionRemainingMs == null) return;
+  state.sessionEndAt = Date.now() + state.sessionRemainingMs;
+  renderSessionTimer();
+  state.sessionTicker = setInterval(tickSessionTimer, 250);
+  applyTimerSwitcherUI();
+}
+
+function pauseSessionTimer() {
+  if (state.sessionTicker) {
+    clearInterval(state.sessionTicker);
+    state.sessionTicker = null;
+  }
+  if (state.sessionEndAt != null) {
+    state.sessionRemainingMs = Math.max(0, state.sessionEndAt - Date.now());
+    state.sessionEndAt = null;
+  }
+  applyTimerSwitcherUI();
+}
+
+// Snapshot the counters a session summary is measured against. Re-taken on
+// every "fresh" start (not on resume-from-pause) — harmless in "Libre" mode,
+// where no summary is ever shown.
+function startSession() {
+  state.sessionStats = {
+    attemptsStart: state.stats.totalAttempts,
+    correctStart: state.stats.totalCorrect,
+    unlockedStart: unlockedNotes().length,
+    levelStart: globalLevel(),
+  };
+  const minutes = state.settings.sessionMinutes;
+  state.sessionRemainingMs = minutes > 0 ? minutes * 60 * 1000 : null;
+  if (state.sessionRemainingMs != null) resumeSessionTimer();
+  else renderSessionTimer();
+  applyTimerSwitcherUI();
+}
+
+function renderSessionSummary() {
+  if (!state.sessionStats) return;
+  const s = state.sessionStats;
+  const attempts = state.stats.totalAttempts - s.attemptsStart;
+  const correct = state.stats.totalCorrect - s.correctStart;
+  const acc = attempts ? Math.round((correct / attempts) * 100) : 0;
+  const unlockedGain = unlockedNotes().length - s.unlockedStart;
+  const levelGain = globalLevel() - s.levelStart;
+  sessionSummaryEl.innerHTML =
+    '<div class="session-summary-title">⏱️ Temps écoulé — bilan de la session</div>' +
+    '<div class="today-chips">' +
+    `<span class="chip">🎵 <b>${attempts}</b> note${attempts > 1 ? 's' : ''}</span>` +
+    `<span class="chip">🎯 <b>${acc}%</b> précision</span>` +
+    `<span class="chip">🔓 <b>${unlockedGain >= 0 ? '+' : ''}${unlockedGain}</b> débloquée${Math.abs(unlockedGain) > 1 ? 's' : ''}</span>` +
+    `<span class="chip">📈 Niveau <b>${levelGain >= 0 ? '+' : ''}${levelGain}</b></span>` +
+    '</div>';
+  sessionSummaryEl.classList.remove('hidden');
+}
+
+function endSessionByTimeout() {
+  if (state.sessionTicker) {
+    clearInterval(state.sessionTicker);
+    state.sessionTicker = null;
+  }
+  state.sessionEndAt = null;
+  state.sessionRemainingMs = null;
+  state.autoMode = false;
+  stopListeningNow();
+  sessionTimerEl.classList.add('hidden');
+  setFeedback('', '');
+  renderSessionSummary();
+  state.sessionStats = null;
+
+  stopBtn.classList.add('hidden');
+  skipBtn.classList.add('hidden');
+  micBtn.classList.add('hidden');
+  startBtn.classList.remove('hidden');
+  startBtn.textContent = '▶️ Commencer';
+  applyTimerSwitcherUI();
+}
+
+timerSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const minutes = Number(btn.dataset.minutes);
+    if (minutes === state.settings.sessionMinutes) return;
+    state.settings.sessionMinutes = minutes;
+    saveState();
+    applyTimerSwitcherUI();
+  });
+});
+
 // ---------- Wiring ----------
 
 startBtn.addEventListener('click', () => {
+  sessionSummaryEl.classList.add('hidden');
+  const resuming = state.sessionRemainingMs != null;
+  if (resuming) resumeSessionTimer();
+  else startSession();
   state.autoMode = true;
   startBtn.classList.add('hidden');
   skipBtn.classList.remove('hidden');
@@ -1405,6 +1543,7 @@ skipBtn.addEventListener('click', () => {
 stopBtn.addEventListener('click', () => {
   state.autoMode = false;
   stopListeningNow();
+  pauseSessionTimer();
   setFeedback('En pause. Clique sur Reprendre pour continuer.', '');
   stopBtn.classList.add('hidden');
   skipBtn.classList.add('hidden');
@@ -1499,6 +1638,7 @@ renderStats();
 renderProgress();
 updateTopbar();
 updateClefSwitcherUI();
+applyTimerSwitcherUI();
 state.micSupported = setupRecognition();
 state.midiSupported = !!navigator.requestMIDIAccess;
 state.midiPermissionDenied = false;
