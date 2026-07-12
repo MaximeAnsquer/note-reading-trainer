@@ -128,6 +128,34 @@ function makeNote(clef, key, order) {
 const NOTES = buildNotes();
 const NOTES_BY_ID = Object.fromEntries(NOTES.map((n) => [n.id, n]));
 
+// The curriculum order notes get unlocked in — separate from `order` (which
+// is the bottom-to-top staff position used for display). Defaults to `order`
+// for every note. Bass is overridden below to start at F3, the line the bass
+// ("F") clef is anchored on and drawn between its two dots — the one note
+// readable straight off the clef symbol with no counting — then radiate
+// outward by diatonic distance, alternating up/down on ties.
+NOTES.forEach((n) => {
+  n.unlockOrder = n.order;
+});
+
+(function assignBassUnlockOrder() {
+  const bass = NOTES.filter((n) => n.clef === 'bass').sort((a, b) => a.order - b.order);
+  const anchorIndex = bass.findIndex((n) => n.key === 'f/3');
+  const ranked = bass
+    .map((n, i) => ({ n, i }))
+    .sort((a, b) => {
+      const da = Math.abs(a.i - anchorIndex);
+      const db = Math.abs(b.i - anchorIndex);
+      if (da !== db) return da - db;
+      const aUp = a.i > anchorIndex;
+      const bUp = b.i > anchorIndex;
+      return aUp === bUp ? 0 : aUp ? -1 : 1;
+    });
+  ranked.forEach(({ n }, rank) => {
+    n.unlockOrder = rank;
+  });
+})();
+
 // ---------- Persistence ----------
 
 function loadState() {
@@ -143,8 +171,8 @@ function loadState() {
     progress[n.id] = { ema: 0.35, attempts: 0, unlocked: false };
   });
 
-  const trebleFirst = NOTES.find((n) => n.clef === 'treble' && n.order === 0);
-  const bassFirst = NOTES.find((n) => n.clef === 'bass' && n.order === 0);
+  const trebleFirst = NOTES.find((n) => n.clef === 'treble' && n.unlockOrder === 0);
+  const bassFirst = NOTES.find((n) => n.clef === 'bass' && n.unlockOrder === 0);
   progress[trebleFirst.id].unlocked = true;
   progress[bassFirst.id].unlocked = true;
 
@@ -215,6 +243,7 @@ const micBtn = document.getElementById('micBtn');
 const skipBtn = document.getElementById('skipBtn');
 const stopBtn = document.getElementById('stopBtn');
 const resetBtn = document.getElementById('resetBtn');
+const resetBassBtn = document.getElementById('resetBassBtn');
 const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
 const importFileInput = document.getElementById('importFile');
@@ -420,7 +449,7 @@ function pickNextNote(excludeId) {
 // sequence (widening the range added notes below already-unlocked ones), so
 // the next candidate is the lowest locked note, not seq[unlocked.length].
 function unlockGate(clef) {
-  const seq = NOTES.filter((n) => n.clef === clef).sort((a, b) => a.order - b.order);
+  const seq = NOTES.filter((n) => n.clef === clef).sort((a, b) => a.unlockOrder - b.unlockOrder);
   const unlocked = seq.filter((n) => state.progress[n.id].unlocked);
   const next = seq.find((n) => !state.progress[n.id].unlocked);
   if (!next || unlocked.length === 0) return null;
@@ -1556,6 +1585,32 @@ resetBtn.addEventListener('click', () => {
   if (!ok) return;
   localStorage.removeItem(STORAGE_KEY);
   window.location.reload();
+});
+
+resetBassBtn.addEventListener('click', () => {
+  const ok = confirm(
+    "Réinitialiser ta progression en clé de Fa ? Tu repartiras de Fa₃ (la note au centre de la clé), puis les notes les plus proches se débloqueront en premier. La clé de Sol n'est pas touchée. Cette action est irréversible."
+  );
+  if (!ok) return;
+
+  NOTES.filter((n) => n.clef === 'bass').forEach((n) => {
+    state.progress[n.id] = { ema: 0.35, attempts: 0, unlocked: false };
+  });
+  const first = NOTES.find((n) => n.clef === 'bass' && n.unlockOrder === 0);
+  state.progress[first.id].unlocked = true;
+
+  // Any queued round may reference a bass note whose progress just got wiped.
+  stopListeningNow();
+  state.noteBatch = [];
+  state.batchDone = [];
+  state.batchIndex = 0;
+
+  saveState();
+  renderStats();
+  renderProgress();
+  updateTopbar();
+  setFeedback(`✅ Clé de Fa réinitialisée. Tu repars de ${first.displayLabel}.`, 'success');
+  if (state.autoMode) beginRound();
 });
 
 exportBtn.addEventListener('click', () => {
