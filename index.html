@@ -53,6 +53,25 @@
         </p>
       </section>
 
+      <section class="card progress-card">
+        <div class="stats-header">
+          <h2>📈 Ta progression</h2>
+          <div class="clef-switcher chart-switcher" id="chartSwitcher">
+            <button class="clef-btn active" data-metric="level">Niveau</button>
+            <button class="clef-btn" data-metric="accuracy">Précision</button>
+            <button class="clef-btn" data-metric="speed">Vitesse</button>
+            <button class="clef-btn" data-metric="volume">Volume</button>
+          </div>
+        </div>
+        <div id="todayChips" class="today-chips"></div>
+        <div id="progressChart" class="progress-chart"></div>
+        <div class="heatmap-wrap">
+          <div class="heatmap-title">Régularité — 12 dernières semaines</div>
+          <div id="calendarHeatmap" class="heatmap"></div>
+        </div>
+        <div id="insights" class="insights hidden"></div>
+      </section>
+
       <section class="card stats-card">
         <div class="stats-header">
           <h2>Progression par note</h2>
@@ -75,6 +94,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
-  <script src="app.js?v=28"></script>
+  <script src="app.js?v=29"></script>
 </body>
 </html>

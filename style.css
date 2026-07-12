@@ -383,6 +383,139 @@ body {
 .note-cell.mid { background: var(--warn); }
 .note-cell.strong { background: var(--success); }
 
+/* ---------- Progress card ---------- */
+
+.chart-switcher {
+  margin-bottom: 0;
+  flex: 0 0 auto;
+}
+
+.chart-switcher .clef-btn {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.today-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.chip {
+  background: #eef0fc;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.chip b { color: var(--primary-dark); }
+
+.chip-fire {
+  background: #fdf0e4;
+}
+
+.chip-fire b { color: #d97706; }
+
+.progress-chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-title {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.chart-tick {
+  font-size: 11px;
+  fill: var(--muted);
+}
+
+.chart-last {
+  font-size: 13px;
+  font-weight: 700;
+  fill: var(--ink);
+}
+
+.chart-empty {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 10px 0;
+  text-align: center;
+}
+
+.heatmap-wrap {
+  margin-top: 14px;
+}
+
+.heatmap-title {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.heatmap {
+  display: flex;
+  gap: 3px;
+}
+
+.hm-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hm-cell {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  display: block;
+}
+
+.hm-0 { background: #eef0f4; }
+.hm-1 { background: #c7d2f8; }
+.hm-2 { background: #8da4f1; }
+.hm-3 { background: #5c78ea; }
+.hm-4 { background: var(--primary-dark); }
+.hm-future { background: transparent; }
+
+.insights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.insight-block {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.insight-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.insight-chip {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.insight-chip b { color: var(--error); font-weight: 700; }
+
 .legend {
   display: flex;
   flex-wrap: wrap;

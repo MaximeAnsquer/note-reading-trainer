@@ -163,13 +163,24 @@ function loadState() {
     Object.assign(settings, saved.settings);
   }
 
-  return { progress, stats, settings };
+  // Daily journal ('YYYY-MM-DD' -> aggregates) and confusion counters
+  // ('Mi₄ → Sol' -> count) power the progress card.
+  const history = (saved && saved.history) || {};
+  const confusions = (saved && saved.confusions) || {};
+
+  return { progress, stats, settings, history, confusions };
 }
 
 function saveState() {
   localStorage.setItem(
     STORAGE_KEY,
-    JSON.stringify({ progress: state.progress, stats: state.stats, settings: state.settings })
+    JSON.stringify({
+      progress: state.progress,
+      stats: state.stats,
+      settings: state.settings,
+      history: state.history,
+      confusions: state.confusions,
+    })
   );
 }
 
@@ -411,6 +422,42 @@ function maybeUnlockNext(clef) {
   return info.next;
 }
 
+function todayKey(d = new Date()) {
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${dd}`;
+}
+
+// 0-100 measure of overall reading level: total mastery across the full
+// range of notes, so it grows both by unlocking new notes and by
+// consolidating the ones already unlocked.
+function globalLevel() {
+  const sum = NOTES.reduce((s, n) => {
+    const p = state.progress[n.id];
+    return s + (p.unlocked ? p.ema : 0);
+  }, 0);
+  return Math.round((sum / NOTES.length) * 100);
+}
+
+// Consecutive practice days ending today (or yesterday, so the streak isn't
+// shown as broken before today's session happened).
+function practiceStreakDays() {
+  let streak = 0;
+  const d = new Date();
+  if (!((state.history[todayKey(d)] || {}).attempts > 0)) d.setDate(d.getDate() - 1);
+  while ((state.history[todayKey(d)] || {}).attempts > 0) {
+    streak += 1;
+    d.setDate(d.getDate() - 1);
+  }
+  return streak;
+}
+
+function recordConfusion(note, givenLabel) {
+  if (!givenLabel) return;
+  const key = `${note.displayLabel} → ${givenLabel}`;
+  state.confusions[key] = (state.confusions[key] || 0) + 1;
+}
+
 function updateAfterAnswer(note, correct, elapsedMs) {
   const p = state.progress[note.id];
   p.attempts += 1;
@@ -424,15 +471,13 @@ function updateAfterAnswer(note, correct, elapsedMs) {
   // Speed tracking, from correct answers only (a wrong answer's timing says
   // nothing about reading fluency). The cap keeps a coffee break from
   // wrecking the averages.
-  if (correct) {
-    const sample = Math.min(elapsedMs || 0, BASELINE_SAMPLE_CAP_MS);
-    if (sample > 0) {
-      if (!state.stats.speedBaseline) state.stats.speedBaseline = {};
-      const mode = state.settings.inputMode;
-      const prev = state.stats.speedBaseline[mode];
-      state.stats.speedBaseline[mode] = prev ? prev + BASELINE_ALPHA * (sample - prev) : sample;
-      p.avgMs = p.avgMs ? p.avgMs + 0.3 * (sample - p.avgMs) : sample;
-    }
+  const sample = correct ? Math.min(elapsedMs || 0, BASELINE_SAMPLE_CAP_MS) : 0;
+  if (sample > 0) {
+    if (!state.stats.speedBaseline) state.stats.speedBaseline = {};
+    const mode = state.settings.inputMode;
+    const prev = state.stats.speedBaseline[mode];
+    state.stats.speedBaseline[mode] = prev ? prev + BASELINE_ALPHA * (sample - prev) : sample;
+    p.avgMs = p.avgMs ? p.avgMs + 0.3 * (sample - p.avgMs) : sample;
   }
   if (correct) {
     state.stats.totalCorrect += 1;
@@ -443,8 +488,25 @@ function updateAfterAnswer(note, correct, elapsedMs) {
   }
 
   const unlocked = maybeUnlockNext(note.clef);
+
+  // Daily journal entry (written after the unlock so the level snapshot
+  // includes the note that was just added).
+  const key = todayKey();
+  const day = (state.history[key] = state.history[key] || {
+    attempts: 0, correct: 0, timeSum: 0, timeCount: 0, level: 0, unlocked: 0,
+  });
+  day.attempts += 1;
+  if (correct) day.correct += 1;
+  if (sample > 0) {
+    day.timeSum += sample;
+    day.timeCount += 1;
+  }
+  day.level = globalLevel();
+  day.unlocked = unlockedNotes().length;
+
   saveState();
   renderStats();
+  renderProgress();
   return unlocked;
 }
 
@@ -660,7 +722,7 @@ function handleNotePlayed(midiNumber) {
   if (letter && letter === state.currentNote.letter) {
     onCorrect();
   } else {
-    onIncorrect(label, null);
+    onIncorrect(label, null, MIDI_DISPLAY_NAMES[pitchClass]);
   }
 }
 
@@ -875,11 +937,14 @@ function onCorrect() {
   }
 }
 
-function onIncorrect(rawHeard, interpretedLabel) {
+function onIncorrect(rawHeard, interpretedLabel, givenLabel) {
   const note = state.currentNote;
   const interpretation = interpretedLabel && interpretedLabel !== rawHeard ? ` (compris : ${interpretedLabel})` : '';
   const source = state.settings.inputMode === 'mic' ? 'Micro a entendu' : 'Clavier a joué';
   setFeedback(`❌ ${source} : "${rawHeard}"${interpretation} — note affichée : ${note.label}`, 'error');
+  // What the player answered instead: the played pitch (MIDI/keyboard) or the
+  // understood syllable (mic). Silence/noise isn't a confusion and passes null.
+  recordConfusion(note, givenLabel || interpretedLabel);
   updateAfterAnswer(note, false);
   updateTopbar();
   // The feedback above reveals the right answer, so re-asking the same note
@@ -1002,6 +1067,211 @@ function updateTopbar() {
   unlockedValueEl.textContent = `${unlockedNotes().length} / ${NOTES.length}`;
 }
 
+// ---------- Progress over time ----------
+
+const todayChipsEl = document.getElementById('todayChips');
+const progressChartEl = document.getElementById('progressChart');
+const heatmapEl = document.getElementById('calendarHeatmap');
+const insightsEl = document.getElementById('insights');
+const chartSwitcherEl = document.getElementById('chartSwitcher');
+
+state.chartMetric = 'level';
+
+const CHART_METRICS = {
+  level: {
+    title: 'Niveau global (0–100)',
+    color: '#4361ee',
+    value: (d) => d.level,
+    domain: [0, 100],
+  },
+  accuracy: {
+    title: 'Précision (%)',
+    color: '#2a9d8f',
+    value: (d) => (d.attempts ? Math.round((d.correct / d.attempts) * 100) : null),
+    domain: [0, 100],
+  },
+  speed: {
+    title: 'Temps de réponse moyen (s) — plus bas = mieux',
+    color: '#f4a261',
+    value: (d) => (d.timeCount ? +(d.timeSum / d.timeCount / 1000).toFixed(2) : null),
+    domain: null,
+  },
+  volume: {
+    title: 'Notes travaillées par jour',
+    color: '#4361ee',
+    value: (d) => d.attempts,
+    domain: null,
+    bars: true,
+  },
+};
+
+function chartDayLabel(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+}
+
+// Days that actually had practice, oldest first, capped to the last 30.
+function chartDays() {
+  return Object.keys(state.history)
+    .filter((k) => state.history[k].attempts > 0)
+    .sort()
+    .slice(-30);
+}
+
+function renderChart() {
+  const metric = CHART_METRICS[state.chartMetric];
+  const days = chartDays();
+  const points = days
+    .map((k) => ({ key: k, v: metric.value(state.history[k]) }))
+    .filter((pt) => pt.v !== null && pt.v !== undefined);
+
+  if (points.length === 0) {
+    progressChartEl.innerHTML =
+      '<div class="chart-empty">Joue quelques notes pour commencer à tracer ta courbe 📈</div>';
+    return;
+  }
+
+  const W = 640, H = 220, L = 36, R = 12, T = 18, B = 26;
+  const plotW = W - L - R, plotH = H - T - B;
+  const values = points.map((p) => p.v);
+  let [lo, hi] = metric.domain || [0, Math.max(...values) * 1.15];
+  if (hi <= lo) hi = lo + 1;
+  const x = (i) => (points.length === 1 ? L + plotW / 2 : L + (i / (points.length - 1)) * plotW);
+  const y = (v) => T + plotH - ((v - lo) / (hi - lo)) * plotH;
+
+  const gridLines = [lo, (lo + hi) / 2, hi]
+    .map((v) => {
+      const yy = y(v).toFixed(1);
+      const label = Number.isInteger(v) ? v : v.toFixed(1);
+      return `<line x1="${L}" y1="${yy}" x2="${W - R}" y2="${yy}" stroke="#e9ecf2"/>` +
+        `<text x="${L - 6}" y="${+yy + 4}" text-anchor="end" class="chart-tick">${label}</text>`;
+    })
+    .join('');
+
+  let marks = '';
+  if (metric.bars) {
+    const bw = Math.min(28, (plotW / points.length) * 0.65);
+    marks = points
+      .map((p, i) => {
+        const yy = y(p.v);
+        return `<rect x="${(x(i) - bw / 2).toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${(T + plotH - yy).toFixed(1)}" rx="3" fill="${metric.color}" opacity="0.6"/>`;
+      })
+      .join('');
+  } else {
+    const coords = points.map((p, i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`);
+    const area = `M${L},${T + plotH} L${coords.join(' L')} L${x(points.length - 1).toFixed(1)},${T + plotH} Z`;
+    marks =
+      `<path d="${area}" fill="${metric.color}" opacity="0.08"/>` +
+      `<polyline points="${coords.join(' ')}" fill="none" stroke="${metric.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>` +
+      points
+        .map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3.5" fill="${metric.color}"><title>${chartDayLabel(p.key)} : ${p.v}</title></circle>`)
+        .join('');
+  }
+
+  const last = points[points.length - 1];
+  const lastLabel = `<text x="${x(points.length - 1).toFixed(1)}" y="${(y(last.v) - 10).toFixed(1)}" text-anchor="middle" class="chart-last">${last.v}</text>`;
+  const xLabels =
+    `<text x="${L}" y="${H - 6}" class="chart-tick">${chartDayLabel(points[0].key)}</text>` +
+    (points.length > 1
+      ? `<text x="${W - R}" y="${H - 6}" text-anchor="end" class="chart-tick">${chartDayLabel(last.key)}</text>`
+      : '');
+
+  progressChartEl.innerHTML =
+    `<div class="chart-title">${metric.title}</div>` +
+    `<svg viewBox="0 0 ${W} ${H}" role="img">${gridLines}${marks}${lastLabel}${xLabels}</svg>` +
+    (points.length === 1 ? '<div class="chart-empty">Reviens demain pour voir ta courbe évoluer 🌱</div>' : '');
+}
+
+function renderTodayChips() {
+  const t = state.history[todayKey()] || { attempts: 0, correct: 0, timeSum: 0, timeCount: 0 };
+  const acc = t.attempts ? Math.round((t.correct / t.attempts) * 100) + '%' : '–';
+  const spd = t.timeCount ? (t.timeSum / t.timeCount / 1000).toFixed(1) + 's' : '–';
+  const days = practiceStreakDays();
+  todayChipsEl.innerHTML = [
+    `<span class="chip">🎵 <b>${t.attempts}</b> note${t.attempts > 1 ? 's' : ''} aujourd'hui</span>`,
+    `<span class="chip">🎯 <b>${acc}</b> précision</span>`,
+    `<span class="chip">⚡ <b>${spd}</b> par note</span>`,
+    `<span class="chip">📈 Niveau <b>${globalLevel()}</b></span>`,
+    `<span class="chip${days > 0 ? ' chip-fire' : ''}">🔥 <b>${days}</b> jour${days > 1 ? 's' : ''} d'affilée</span>`,
+  ].join('');
+}
+
+const HEATMAP_WEEKS = 12;
+
+function renderHeatmap() {
+  const today = new Date();
+  const start = new Date(today);
+  const mondayOffset = (today.getDay() + 6) % 7;
+  start.setDate(today.getDate() - mondayOffset - (HEATMAP_WEEKS - 1) * 7);
+
+  let html = '';
+  for (let w = 0; w < HEATMAP_WEEKS; w++) {
+    let col = '';
+    for (let d = 0; d < 7; d++) {
+      const cellDate = new Date(start);
+      cellDate.setDate(start.getDate() + w * 7 + d);
+      if (cellDate > today) {
+        col += '<i class="hm-cell hm-future"></i>';
+        continue;
+      }
+      const entry = state.history[todayKey(cellDate)];
+      const n = entry ? entry.attempts : 0;
+      const bucket = n === 0 ? 0 : n < 25 ? 1 : n < 75 ? 2 : n < 150 ? 3 : 4;
+      const dateLabel = cellDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+      col += `<i class="hm-cell hm-${bucket}" title="${dateLabel} — ${n} note${n > 1 ? 's' : ''}"></i>`;
+    }
+    html += `<span class="hm-col">${col}</span>`;
+  }
+  heatmapEl.innerHTML = html;
+}
+
+function renderInsights() {
+  const weak = unlockedNotes()
+    .filter((n) => state.progress[n.id].attempts > 0 && state.progress[n.id].ema < 0.7)
+    .sort((a, b) => state.progress[a.id].ema - state.progress[b.id].ema)
+    .slice(0, 3);
+  const confusions = Object.entries(state.confusions)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+
+  let html = '';
+  if (weak.length) {
+    html +=
+      '<div class="insight-block"><div class="insight-title">🎯 À travailler</div>' +
+      weak
+        .map((n) => `<span class="insight-chip">${n.displayLabel} · ${Math.round(state.progress[n.id].ema * 100)}%</span>`)
+        .join('') +
+      '</div>';
+  }
+  if (confusions.length) {
+    html +=
+      '<div class="insight-block"><div class="insight-title">🔀 Confusions fréquentes</div>' +
+      confusions
+        .map(([pair, count]) => `<span class="insight-chip">${pair} <b>(${count}×)</b></span>`)
+        .join('') +
+      '</div>';
+  }
+  insightsEl.innerHTML = html;
+  insightsEl.classList.toggle('hidden', !html);
+}
+
+function renderProgress() {
+  renderTodayChips();
+  renderChart();
+  renderHeatmap();
+  renderInsights();
+}
+
+chartSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    state.chartMetric = btn.dataset.metric;
+    chartSwitcherEl.querySelectorAll('.clef-btn').forEach((b) => {
+      b.classList.toggle('active', b === btn);
+    });
+    renderChart();
+  });
+});
+
 // ---------- Clef switcher ----------
 
 function updateClefSwitcherUI() {
@@ -1089,6 +1359,8 @@ exportBtn.addEventListener('click', () => {
     progress: state.progress,
     stats: state.stats,
     settings: state.settings,
+    history: state.history,
+    confusions: state.confusions,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -1137,12 +1409,15 @@ importFileInput.addEventListener('change', () => {
     });
     if (data.stats) Object.assign(state.stats, data.stats);
     if (data.settings) Object.assign(state.settings, data.settings);
+    if (data.history) state.history = data.history;
+    if (data.confusions) state.confusions = data.confusions;
     state.noteBatch = [];
     state.batchDone = [];
     state.batchIndex = 0;
 
     saveState();
     renderStats();
+    renderProgress();
     updateTopbar();
     updateClefSwitcherUI();
     setFeedback('✅ Progression importée avec succès.', 'success');
@@ -1154,6 +1429,7 @@ importFileInput.addEventListener('change', () => {
 // ---------- Init ----------
 
 renderStats();
+renderProgress();
 updateTopbar();
 updateClefSwitcherUI();
 state.micSupported = setupRecognition();
