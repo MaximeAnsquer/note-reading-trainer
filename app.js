@@ -102,15 +102,16 @@ const NOVELTY_BONUS = 1.0;
 // leapfrog a note that's genuinely still weak, only other mastered notes.
 const STALENESS_FACTOR = 0.5;
 
-// Mastery weight is MASTERY_FLOOR + (1-ema)^MASTERY_EXPONENT. The floor is
-// what really decides how much time goes to already-mastered notes (they all
-// sit on it), so it's kept very low: a mastered note shows up well under 1%
-// of the time in a typical pool. The exponent stays moderate on purpose —
-// pushing it higher would flatten the 0.4-0.8 mastery range down onto the
-// floor too, and it's exactly that middle range ("shaky but not failing")
-// that should stay clearly separated from the mastered pack.
-const MASTERY_EXPONENT = 4;
-const MASTERY_FLOOR = 0.002;
+// Mastery weight is MASTERY_FLOOR + (1-ema)^MASTERY_EXPONENT. Counter-
+// intuitively, a HIGHER exponent collapses weight to the floor faster as ema
+// climbs, which flattens every well-mastered note (0.7-1.0) down to
+// indistinguishable near-floor values — exactly the "everything shows ~5%"
+// complaint. A lower exponent keeps (1-ema) decaying more gently, so the
+// gradient stays visible across the whole mastery range, right up near 1.0,
+// while the floor (kept tiny) still ensures a barely-mastered note pulls far
+// more weight than a near-perfect one.
+const MASTERY_EXPONENT = 3;
+const MASTERY_FLOOR = 0.001;
 
 function correctnessScore(correct, elapsedMs) {
   if (!correct) return 0;
