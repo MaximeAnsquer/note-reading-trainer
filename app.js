@@ -44,7 +44,21 @@ function midiNoteName(midiNumber) {
 const MIN_ATTEMPTS_TO_UNLOCK = 2;
 const UNLOCK_THRESHOLD = 0.6;
 const EMA_ALPHA = 0.35;
+// A miss stings harder than a success soothes: mastery falls faster on
+// errors than it climbs on correct answers, so one mistake visibly re-opens
+// work on that note (and drops it back into the review pool).
+const EMA_ALPHA_MISS = 0.5;
 const STORAGE_KEY = 'noteReadingTrainerV1';
+
+// Recent-trouble boost. A missed note multiplies its pick weight by
+// (1 + TROUBLE_BOOST_MISS) — a x5 spike — and a correct answer notably
+// slower than the player's own rolling pace (beyond SLOW_TROUBLE_RATIO x the
+// per-mode baseline) keeps it at least at x(1 + TROUBLE_BOOST_SLOW). The
+// boost fades one step per fast correct answer on that note, so redemption
+// takes several clean reads, not one lucky hit.
+const TROUBLE_BOOST_MISS = 4;
+const TROUBLE_BOOST_SLOW = 2;
+const SLOW_TROUBLE_RATIO = 1.5;
 
 // A correct answer only counts as full mastery if it was quick; a slow-but-
 // correct answer still counts (you did read the note right) but drags the
@@ -431,7 +445,7 @@ function noteWeight(note, poolSize) {
   const gap = state.stats.totalAttempts - (p.lastSeenAt || 0);
   const horizon = Math.max(1, 6 * poolSize);
   const staleness = STALENESS_FACTOR * Math.min(1, gap / horizon);
-  let w = mastery * (1 + staleness);
+  let w = mastery * (1 + staleness) * (1 + (p.troubleBoost || 0));
   w += NOVELTY_BONUS * Math.max(0, 1 - p.attempts / NOVELTY_ATTEMPTS);
   return w;
 }
@@ -523,7 +537,16 @@ function updateAfterAnswer(note, correct, elapsedMs) {
   const p = state.progress[note.id];
   p.attempts += 1;
   const score = correctnessScore(correct, elapsedMs || 0);
-  p.ema = p.ema + EMA_ALPHA * (score - p.ema);
+  p.ema = p.ema + (correct ? EMA_ALPHA : EMA_ALPHA_MISS) * (score - p.ema);
+
+  // Trouble tracking. "Slow" compares against the baseline as it stood
+  // before this answer gets averaged in — the question is "slower than my
+  // usual pace on the other notes", not "slower than a pace it just dragged
+  // down itself".
+  const notablySlow = correct && (elapsedMs || 0) > SLOW_TROUBLE_RATIO * speedBaselineMs();
+  if (!correct) p.troubleBoost = TROUBLE_BOOST_MISS;
+  else if (notablySlow) p.troubleBoost = Math.max((p.troubleBoost || 0) - 1, TROUBLE_BOOST_SLOW);
+  else p.troubleBoost = Math.max(0, (p.troubleBoost || 0) - 1);
 
   state.stats.totalAttempts += 1;
   p.lastSeenAt = state.stats.totalAttempts;
@@ -1096,11 +1119,13 @@ function renderStats() {
       return;
     }
     const learning = entry.attempts < NOVELTY_ATTEMPTS;
-    labelEl.textContent = (learning ? '✨ ' : '') + n.displayLabel;
+    const inTrouble = (entry.troubleBoost || 0) >= TROUBLE_BOOST_SLOW;
+    labelEl.textContent = (inTrouble ? '⚠️ ' : learning ? '✨ ' : '') + n.displayLabel;
     pctEl.textContent = (pickPcts.get(n.id) || 0) + '%';
     fillEl.style.width = Math.round(entry.ema * 100) + '%';
     const avgPart = entry.avgMs ? ` · temps moyen ${(entry.avgMs / 1000).toFixed(1)}s` : '';
-    cell.title = `${n.displayLabel} — maîtrise ${Math.round(entry.ema * 100)}% · ${entry.attempts} essai${entry.attempts > 1 ? 's' : ''}${avgPart}`;
+    const troublePart = inTrouble ? ' · à retravailler (erreur ou lenteur récente)' : '';
+    cell.title = `${n.displayLabel} — maîtrise ${Math.round(entry.ema * 100)}% · ${entry.attempts} essai${entry.attempts > 1 ? 's' : ''}${avgPart}${troublePart}`;
   });
 
   // Flash the cell of the note that was just answered, so the eye is drawn
