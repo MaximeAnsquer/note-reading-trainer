@@ -82,9 +82,11 @@ const NOVELTY_BONUS = 1.0;
 
 // Notes not asked for a while get a gentle boost (capped), so mastered notes
 // keep resurfacing for spaced review instead of disappearing forever once
-// their mastery weight bottoms out. Kept small relative to MASTERY_FLOOR so
-// staleness alone can never outweigh genuine weakness.
-const STALENESS_BONUS = 0.04;
+// their mastery weight bottoms out. Expressed as a fraction of the note's own
+// mastery weight (not a flat constant) so it can only nudge among notes that
+// are already similarly weighted — a long-untouched mastered note can never
+// leapfrog a note that's genuinely still weak, only other mastered notes.
+const STALENESS_FACTOR = 0.5;
 
 // Mastery weight is MASTERY_FLOOR + (1-ema)^MASTERY_EXPONENT: a high exponent
 // with a low floor means the least-mastered notes dominate the draw far more
@@ -425,11 +427,12 @@ function practicePool() {
 //   (small) review bonus, so mastered notes still resurface periodically.
 function noteWeight(note, poolSize) {
   const p = state.progress[note.id];
-  let w = Math.pow(1 - p.ema, MASTERY_EXPONENT) + MASTERY_FLOOR;
-  w += NOVELTY_BONUS * Math.max(0, 1 - p.attempts / NOVELTY_ATTEMPTS);
+  const mastery = Math.pow(1 - p.ema, MASTERY_EXPONENT) + MASTERY_FLOOR;
   const gap = state.stats.totalAttempts - (p.lastSeenAt || 0);
   const horizon = Math.max(1, 6 * poolSize);
-  w += STALENESS_BONUS * Math.min(1, gap / horizon);
+  const staleness = STALENESS_FACTOR * Math.min(1, gap / horizon);
+  let w = mastery * (1 + staleness);
+  w += NOVELTY_BONUS * Math.max(0, 1 - p.attempts / NOVELTY_ATTEMPTS);
   return w;
 }
 
