@@ -102,12 +102,15 @@ const NOVELTY_BONUS = 1.0;
 // leapfrog a note that's genuinely still weak, only other mastered notes.
 const STALENESS_FACTOR = 0.5;
 
-// Mastery weight is MASTERY_FLOOR + (1-ema)^MASTERY_EXPONENT: a high exponent
-// with a low floor means the least-mastered notes dominate the draw far more
-// than a middling gap in ema would suggest, while still leaving every
-// unlocked note some (tiny) chance so nothing fully disappears.
-const MASTERY_EXPONENT = 6;
-const MASTERY_FLOOR = 0.01;
+// Mastery weight is MASTERY_FLOOR + (1-ema)^MASTERY_EXPONENT. The floor is
+// what really decides how much time goes to already-mastered notes (they all
+// sit on it), so it's kept very low: a mastered note shows up well under 1%
+// of the time in a typical pool. The exponent stays moderate on purpose —
+// pushing it higher would flatten the 0.4-0.8 mastery range down onto the
+// floor too, and it's exactly that middle range ("shaky but not failing")
+// that should stay clearly separated from the mastered pack.
+const MASTERY_EXPONENT = 4;
+const MASTERY_FLOOR = 0.002;
 
 function correctnessScore(correct, elapsedMs) {
   if (!correct) return 0;
