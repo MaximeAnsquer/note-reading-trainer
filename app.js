@@ -41,8 +41,15 @@ function midiNoteName(midiNumber) {
   return `${MIDI_DISPLAY_NAMES[pitchClass]}${toSubscript(octave)}`;
 }
 
-const MIN_ATTEMPTS_TO_UNLOCK = 2;
-const UNLOCK_THRESHOLD = 0.6;
+// How solidly the most-recently-unlocked note must be answered before the
+// next one appears. With EMA_ALPHA=0.35, a run of fast correct answers
+// crosses 0.6 ema by the 2nd attempt — new notes were arriving almost as
+// fast as they could be answered. Raising both makes attempts the binding
+// constraint for a fast learner (~8 solid reps before the next note, even if
+// mastery climbs past the bar sooner), so each note gets real practice time
+// on its own before the pool grows.
+const MIN_ATTEMPTS_TO_UNLOCK = 8;
+const UNLOCK_THRESHOLD = 0.8;
 const EMA_ALPHA = 0.35;
 // A miss stings harder than a success soothes: mastery falls faster on
 // errors than it climbs on correct answers, so one mistake visibly re-opens
@@ -1010,21 +1017,16 @@ function onCorrect() {
   const elapsedMs = Date.now() - (state.noteShownAt || Date.now());
   const elapsedLabel = (elapsedMs / 1000).toFixed(1) + 's';
   const speed = elapsedMs <= fastAnswerMs() ? ' ⚡' : elapsedMs >= slowAnswerMs() ? ' 🐢' : '';
-  const unlocked = updateAfterAnswer(note, true, elapsedMs);
+  // A new-note unlock can happen here, but deliberately gets no feedback of
+  // its own and no extra delay: it's surfaced in the stats grid (🔒 turning
+  // into a live cell) rather than interrupting the answer flow or timing.
+  updateAfterAnswer(note, true, elapsedMs);
   const streak = state.stats.streak;
   const milestone = streak > 0 && streak % 10 === 0 ? ` · 🔥 ${streak} d'affilée !` : '';
   setFeedback(`✅ ${note.label} (${elapsedLabel}${speed})${milestone}`, 'success');
   updateTopbar();
-  if (unlocked) {
-    setTimeout(() => {
-      setFeedback(`🎉 Nouvelle note débloquée : ${unlocked.label} (${unlocked.clef === 'treble' ? 'clé de sol' : 'clé de fa'})`, 'success');
-    }, 150);
-  }
   advanceAfterCorrect();
-  if (state.autoMode) {
-    if (unlocked) setTimeout(() => beginRound(), 600);
-    else beginRound();
-  }
+  if (state.autoMode) beginRound();
 }
 
 function onIncorrect(rawHeard, interpretedLabel, givenLabel) {
