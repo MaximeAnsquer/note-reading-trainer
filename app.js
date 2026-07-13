@@ -55,6 +55,12 @@ const STORAGE_KEY = 'noteReadingTrainerV1';
 // informational: it doesn't feed the pick-weight formula.
 const LEARNING_ATTEMPTS = 6;
 
+// Flat penalty added to a note's measured time for every miss along the way,
+// on top of the real elapsed time (which already keeps running through
+// retries — see onIncorrect). Makes a mistake cost something predictable
+// even if the very next retry is instant.
+const MISS_TIME_PENALTY_MS = 5000;
+
 const BASELINE_ALPHA = 0.12;
 const DEFAULT_BASELINE_MS = 2500;
 const BASELINE_SAMPLE_CAP_MS = 15000;
@@ -209,6 +215,9 @@ state.lastAnswered = null;
 // True right after a miss, until the note is retried correctly or skipped —
 // turns the current note red on the staff instead of the usual blue.
 state.currentWrong = false;
+// Accumulates 5s per miss on the current note (see MISS_TIME_PENALTY_MS),
+// added to its elapsed time once finally answered correctly.
+state.missPenaltyMs = 0;
 // Session-only: not persisted, so a forgotten review session can't silently
 // block curriculum progress across visits.
 state.reviewMode = false;
@@ -987,6 +996,7 @@ function beginRound() {
   state.currentNote = state.noteBatch[state.batchIndex];
   state.noteShownAt = Date.now();
   state.currentWrong = false;
+  state.missPenaltyMs = 0;
   renderBatch(state.noteBatch, state.batchIndex, state.batchDone, false);
   // Deliberately keep the last feedback visible: rounds now chain instantly
   // after a correct answer, so clearing here would wipe the ✅ message in the
@@ -1013,7 +1023,7 @@ function setFeedback(text, kind) {
 
 function onCorrect() {
   const note = state.currentNote;
-  const elapsedMs = Date.now() - (state.noteShownAt || Date.now());
+  const elapsedMs = Date.now() - (state.noteShownAt || Date.now()) + (state.missPenaltyMs || 0);
   const elapsedLabel = (elapsedMs / 1000).toFixed(1) + 's';
   const speed = elapsedMs <= fastAnswerMs() ? ' ⚡' : elapsedMs >= slowAnswerMs() ? ' 🐢' : '';
   // A new-note unlock can happen here, but deliberately gets no feedback of
@@ -1032,19 +1042,23 @@ function onIncorrect(rawHeard, interpretedLabel, givenLabel) {
   const note = state.currentNote;
   const interpretation = interpretedLabel && interpretedLabel !== rawHeard ? ` (compris : ${interpretedLabel})` : '';
   const source = state.settings.inputMode === 'mic' ? 'Micro a entendu' : 'Clavier a joué';
-  setFeedback(`❌ ${source} : "${rawHeard}"${interpretation} — note affichée : ${note.label}`, 'error');
+  // Deliberately doesn't name the correct note: it's a sight-reading drill,
+  // so the answer must come from re-reading the (now red) staff, not from
+  // being told the label in text.
+  setFeedback(`❌ ${source} : "${rawHeard}"${interpretation}`, 'error');
   // What the player answered instead: the played pitch (MIDI/keyboard) or the
   // understood syllable (mic). Silence/noise isn't a confusion and passes null.
   recordConfusion(note, givenLabel || interpretedLabel);
   updateAfterAnswer(note, false);
   updateTopbar();
+  state.missPenaltyMs = (state.missPenaltyMs || 0) + MISS_TIME_PENALTY_MS;
 
   // Stay on the same note instead of moving on: it turns red, and
   // noteShownAt is deliberately left untouched, so the clock keeps running
   // from when the note first appeared. Only the average time matters now
   // (see noteWeight), so the eventual correct answer's elapsed time should
-  // reflect the whole struggle — misses included — not reset to a clean,
-  // misleadingly fast final guess.
+  // reflect the whole struggle — misses and their flat penalty included —
+  // not reset to a clean, misleadingly fast final guess.
   state.currentWrong = true;
   renderBatch(state.noteBatch, state.batchIndex, state.batchDone, true);
   if (state.autoMode) beginListening();
