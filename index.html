@@ -106,7 +106,14 @@
           <span><i class="dot dot-strong"></i> Maîtrisée</span>
         </div>
 
-        <h3 class="table-title">Détail par note</h3>
+        <div class="table-header">
+          <h3 class="table-title">Détail par note</h3>
+          <div class="clef-switcher table-clef-filter" id="tableClefFilter">
+            <button class="clef-btn active" data-clef="both">Les deux</button>
+            <button class="clef-btn" data-clef="treble">Clé de Sol</button>
+            <button class="clef-btn" data-clef="bass">Clé de Fa</button>
+          </div>
+        </div>
         <div class="table-scroll">
           <table id="notesTable" class="notes-table">
             <thead>
@@ -129,6 +136,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
-  <script src="app.js?v=39"></script>
+  <script src="app.js?v=40"></script>
 </body>
 </html>

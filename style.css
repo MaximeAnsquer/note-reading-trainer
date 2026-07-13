@@ -600,10 +600,30 @@ body {
 .dot-mid { background: var(--warn); }
 .dot-strong { background: var(--success); }
 
+.table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
 .table-title {
   font-size: 14px;
-  margin: 20px 0 10px;
+  margin: 0 0 10px;
   color: var(--ink);
+}
+
+.table-clef-filter {
+  margin-bottom: 10px;
+  width: auto;
+}
+
+.table-clef-filter .clef-btn {
+  flex: none;
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 .table-scroll {

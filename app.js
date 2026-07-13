@@ -1187,6 +1187,7 @@ function renderStats() {
 const NOTES_TABLE_MISSING = -1;
 
 state.tableSort = { key: 'pick', dir: 'desc' };
+state.tableClefFilter = 'both';
 
 function noteTableRow(n, pickPcts) {
   const p = state.progress[n.id];
@@ -1229,7 +1230,9 @@ function sortVal(row, key) {
 function renderNotesTable() {
   const { key, dir } = state.tableSort;
   const pickPcts = pickProbabilities();
-  const rows = NOTES.map((n) => noteTableRow(n, pickPcts)).sort((a, b) => {
+  const filtered =
+    state.tableClefFilter === 'both' ? NOTES : NOTES.filter((n) => n.clef === state.tableClefFilter);
+  const rows = filtered.map((n) => noteTableRow(n, pickPcts)).sort((a, b) => {
     const va = sortVal(a, key);
     const vb = sortVal(b, key);
     let cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
@@ -1272,6 +1275,17 @@ notesTableEl.querySelectorAll('th[data-sort]').forEach((th) => {
     } else {
       state.tableSort = { key, dir: key === 'label' || key === 'clef' || key === 'status' ? 'asc' : 'desc' };
     }
+    renderNotesTable();
+  });
+});
+
+const tableClefFilterEl = document.getElementById('tableClefFilter');
+tableClefFilterEl.querySelectorAll('.clef-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const clef = btn.dataset.clef;
+    if (clef === state.tableClefFilter) return;
+    state.tableClefFilter = clef;
+    tableClefFilterEl.querySelectorAll('.clef-btn').forEach((b) => b.classList.toggle('active', b === btn));
     renderNotesTable();
   });
 });
