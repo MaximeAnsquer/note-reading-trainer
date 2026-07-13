@@ -206,6 +206,9 @@ state.noteBatch = [];
 state.batchDone = [];
 state.batchIndex = 0;
 state.lastAnswered = null;
+// True right after a miss, until the note is retried correctly or skipped —
+// turns the current note red on the staff instead of the usual blue.
+state.currentWrong = false;
 // Session-only: not persisted, so a forgotten review session can't silently
 // block curriculum progress across visits.
 state.reviewMode = false;
@@ -249,13 +252,16 @@ const unlockedValueEl = document.getElementById('unlockedValue');
 const CURRENT_NOTE_STYLE = { fillStyle: '#4361ee', strokeStyle: '#4361ee' };
 const DONE_NOTE_STYLE = { fillStyle: '#2a9d8f', strokeStyle: '#2a9d8f' };
 const UPCOMING_NOTE_STYLE = { fillStyle: '#b7bbcf', strokeStyle: '#b7bbcf' };
+const WRONG_NOTE_STYLE = { fillStyle: '#e63946', strokeStyle: '#e63946' };
 const STAFF_SCALE = 1.45;
 
 // Notes already recognized in this batch stay visible but dim to "done";
 // the note currently being asked is highlighted; the rest wait their turn.
-function styleForPosition(index, currentIndex, doneMask) {
+// A just-missed current note turns red instead of blue, staying that way
+// through the retry until it's answered correctly.
+function styleForPosition(index, currentIndex, doneMask, wrong) {
   if (doneMask[index]) return DONE_NOTE_STYLE;
-  if (index === currentIndex) return CURRENT_NOTE_STYLE;
+  if (index === currentIndex) return wrong ? WRONG_NOTE_STYLE : CURRENT_NOTE_STYLE;
   return UPCOMING_NOTE_STYLE;
 }
 
@@ -269,12 +275,12 @@ function createScaledContext(unscaledWidth, unscaledHeight) {
   return context;
 }
 
-function renderBatch(batch, currentIndex, doneMask) {
+function renderBatch(batch, currentIndex, doneMask, wrong) {
   const clefsUsed = new Set(batch.map((n) => n.clef));
   if (clefsUsed.size > 1) {
-    renderGrandStaffBatch(batch, currentIndex, doneMask);
+    renderGrandStaffBatch(batch, currentIndex, doneMask, wrong);
   } else {
-    renderSingleStaffBatch(batch, currentIndex, doneMask, batch[0].clef);
+    renderSingleStaffBatch(batch, currentIndex, doneMask, batch[0].clef, wrong);
   }
 }
 
@@ -294,7 +300,7 @@ function pickProbabilities() {
   return map;
 }
 
-function renderSingleStaffBatch(batch, currentIndex, doneMask, clef) {
+function renderSingleStaffBatch(batch, currentIndex, doneMask, clef, wrong) {
   const VF = Vex.Flow;
   const context = createScaledContext(400, 190);
 
@@ -304,7 +310,7 @@ function renderSingleStaffBatch(batch, currentIndex, doneMask, clef) {
 
   const staveNotes = batch.map((note, i) => {
     const sn = new VF.StaveNote({ keys: [note.key], duration: 'q', clef });
-    sn.setStyle(styleForPosition(i, currentIndex, doneMask));
+    sn.setStyle(styleForPosition(i, currentIndex, doneMask, wrong));
     return sn;
   });
 
@@ -314,7 +320,7 @@ function renderSingleStaffBatch(batch, currentIndex, doneMask, clef) {
   voice.draw(context, stave);
 }
 
-function renderGrandStaffBatch(batch, currentIndex, doneMask) {
+function renderGrandStaffBatch(batch, currentIndex, doneMask, wrong) {
   const VF = Vex.Flow;
   const context = createScaledContext(400, 320);
 
@@ -339,7 +345,7 @@ function renderGrandStaffBatch(batch, currentIndex, doneMask) {
   const bassNotes = [];
 
   batch.forEach((note, i) => {
-    const style = styleForPosition(i, currentIndex, doneMask);
+    const style = styleForPosition(i, currentIndex, doneMask, wrong);
     if (note.clef === 'treble') {
       const sn = new VF.StaveNote({ keys: [note.key], duration: 'q', clef: 'treble' });
       sn.setStyle(style);
@@ -422,9 +428,7 @@ function poolMinAvgMs(pool) {
 // avgMs, i.e. "how many times slower than my best note, as a fraction of
 // that best time" — subtracting the floor before comparing, exactly so
 // that a note which is merely a little slower than the fastest doesn't
-// get lost against the fastest's own absolute time. A note with no
-// recorded average yet (never answered correctly) is neutral on this factor
-// alone; ERROR_WEIGHT_FLOOR below is what keeps it from vanishing.
+// get lost against the fastest's own absolute time.
 const SPEED_GAP_FACTOR = 4;
 const SPEED_GAP_MAX = 6;
 
@@ -434,21 +438,19 @@ function speedGapBoost(p, poolMin) {
   return Math.min(SPEED_GAP_MAX, SPEED_GAP_FACTOR * relativeGap);
 }
 
-// Pick weight is exactly two things, multiplied: how often you get this
-// note wrong, and how much slower you are on it than your best note in the
-// pool. Nothing else — no separate mastery score, no decay, no recency
-// spike. ERROR_WEIGHT_FLOOR keeps a note that's never been missed (or never
-// tried) from hitting literal zero, so it can still surface, driven purely
-// by the speed factor or by chance.
-const ERROR_WEIGHT_FLOOR = 0.02;
+// Pick weight is driven by average time alone — how much slower a note's
+// rolling average is than the pool's fastest note — not by error rate.
+// TIME_WEIGHT_FLOOR keeps even the fastest note from hitting literal zero,
+// so it can still turn up sometimes. A note with no correct answer recorded
+// yet has nothing to compare, so it's treated as needing full attention
+// until a real time comes in.
+const TIME_WEIGHT_FLOOR = 0.1;
+const TIME_WEIGHT_NO_DATA = TIME_WEIGHT_FLOOR + SPEED_GAP_MAX + 1;
 
 function noteWeight(note, poolMin) {
   const p = state.progress[note.id];
-  // No attempts yet: nothing to measure, so treat it like a fully-wrong
-  // note until real data comes in — it'll get drilled right away.
-  const errorWeight = (p.attempts ? errorRateOf(p) : 1) + ERROR_WEIGHT_FLOOR;
-  const speedBoost = speedGapBoost(p, poolMin);
-  return errorWeight * (1 + speedBoost);
+  if (p.avgMs == null) return TIME_WEIGHT_NO_DATA;
+  return TIME_WEIGHT_FLOOR + speedGapBoost(p, poolMin);
 }
 
 function pickNextNote(excludeId) {
@@ -984,7 +986,8 @@ function beginRound() {
   }
   state.currentNote = state.noteBatch[state.batchIndex];
   state.noteShownAt = Date.now();
-  renderBatch(state.noteBatch, state.batchIndex, state.batchDone);
+  state.currentWrong = false;
+  renderBatch(state.noteBatch, state.batchIndex, state.batchDone, false);
   // Deliberately keep the last feedback visible: rounds now chain instantly
   // after a correct answer, so clearing here would wipe the ✅ message in the
   // same frame it was written.
@@ -1035,15 +1038,16 @@ function onIncorrect(rawHeard, interpretedLabel, givenLabel) {
   recordConfusion(note, givenLabel || interpretedLabel);
   updateAfterAnswer(note, false);
   updateTopbar();
-  // The feedback above reveals the right answer, so re-asking the same note
-  // immediately would score a trivial "success" and inflate its mastery.
-  // Move on instead: the missed note stays undone in the batch and comes back
-  // after the others, as a genuine test with fresh timing.
-  skipCurrent();
-  if (state.autoMode) {
-    if (state.settings.inputMode === 'mic') setTimeout(() => beginRound(), 700);
-    else beginRound();
-  }
+
+  // Stay on the same note instead of moving on: it turns red, and
+  // noteShownAt is deliberately left untouched, so the clock keeps running
+  // from when the note first appeared. Only the average time matters now
+  // (see noteWeight), so the eventual correct answer's elapsed time should
+  // reflect the whole struggle — misses included — not reset to a clean,
+  // misleadingly fast final guess.
+  state.currentWrong = true;
+  renderBatch(state.noteBatch, state.batchIndex, state.batchDone, true);
+  if (state.autoMode) beginListening();
 }
 
 // ---------- Stats UI ----------
