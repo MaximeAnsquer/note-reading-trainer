@@ -345,7 +345,8 @@ function renderBatch(batch, currentIndex, doneMask) {
 // clef filter) are absent from the map and display as 0%.
 function pickProbabilities() {
   const pool = practicePool();
-  const weights = pool.map((n) => noteWeight(n, pool.length));
+  const poolMin = poolMinAvgMs(pool);
+  const weights = pool.map((n) => noteWeight(n, pool.length, poolMin));
   const total = weights.reduce((a, b) => a + b, 0);
   const map = new Map();
   if (total > 0) {
@@ -450,15 +451,47 @@ function practicePool() {
   return weak.length >= REVIEW_MIN_POOL ? weak : sorted.slice(0, Math.min(REVIEW_MIN_POOL, sorted.length));
 }
 
-// Pick weight combines three pressures:
+// Fastest recorded rolling average in a pool, or null if nobody in it has
+// answered correctly yet. Used as the zero-point for the relative-speed
+// factor below: gaps are measured from the pool's own best time, not from
+// an absolute duration, so they stay meaningful across input modes and
+// players of very different paces.
+function poolMinAvgMs(pool) {
+  let min = null;
+  pool.forEach((n) => {
+    const avg = state.progress[n.id].avgMs;
+    if (avg != null && (min == null || avg < min)) min = avg;
+  });
+  return min;
+}
+
+// Relative-speed boost: (avgMs - pool's fastest avgMs) / pool's fastest
+// avgMs, i.e. "how many times slower than my best note, as a fraction of
+// that best time" — subtracting the floor before comparing, exactly so
+// that a note which is merely a little slower than the fastest doesn't
+// get lost against the fastest's own absolute time. A note with no
+// recorded average yet (never answered correctly) is neutral: it neither
+// gains nor loses from this factor, since NOVELTY_BONUS already covers it.
+const SPEED_GAP_FACTOR = 4;
+const SPEED_GAP_MAX = 6;
+
+function speedGapBoost(p, poolMin) {
+  if (p.avgMs == null || poolMin == null || poolMin <= 0) return 0;
+  const relativeGap = Math.max(0, p.avgMs - poolMin) / poolMin;
+  return Math.min(SPEED_GAP_MAX, SPEED_GAP_FACTOR * relativeGap);
+}
+
+// Pick weight combines four pressures:
 // - mastery gap: sharply favors notes still being missed; the small floor
 //   keeps mastered notes reachable without letting their combined weight
 //   (there can be many of them) drown out the few notes that need work;
+// - relative speed: notes whose average response time trails the pool's
+//   fastest note get pulled forward proportionally to that gap;
 // - novelty: freshly unlocked notes are drilled right away and often, fading
 //   back to normal over their first NOVELTY_ATTEMPTS attempts;
 // - staleness: notes unseen for roughly six laps of the pool earn the full
 //   (small) review bonus, so mastered notes still resurface periodically.
-function noteWeight(note, poolSize) {
+function noteWeight(note, poolSize, poolMin) {
   const p = state.progress[note.id];
   const mastery = Math.pow(1 - p.ema, MASTERY_EXPONENT) + MASTERY_FLOOR;
   // Clamped to 0: lastSeenAt should never exceed the current totalAttempts
@@ -467,7 +500,8 @@ function noteWeight(note, poolSize) {
   const gap = Math.max(0, state.stats.totalAttempts - (p.lastSeenAt || 0));
   const horizon = Math.max(1, 6 * poolSize);
   const staleness = STALENESS_FACTOR * Math.min(1, gap / horizon);
-  let w = mastery * (1 + staleness) * (1 + (p.troubleBoost || 0));
+  const speedBoost = speedGapBoost(p, poolMin);
+  let w = mastery * (1 + staleness) * (1 + (p.troubleBoost || 0)) * (1 + speedBoost);
   w += NOVELTY_BONUS * Math.max(0, 1 - p.attempts / NOVELTY_ATTEMPTS);
   return w;
 }
@@ -481,7 +515,8 @@ function pickNextNote(excludeId) {
     if (withoutPrevious.length > 0) candidates = withoutPrevious;
   }
 
-  const weights = candidates.map((n) => noteWeight(n, candidates.length));
+  const poolMin = poolMinAvgMs(candidates);
+  const weights = candidates.map((n) => noteWeight(n, candidates.length, poolMin));
   const total = weights.reduce((a, b) => a + b, 0);
   let r = Math.random() * total;
   for (let i = 0; i < candidates.length; i++) {
