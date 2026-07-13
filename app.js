@@ -58,13 +58,19 @@ const EMA_ALPHA_MISS = 0.5;
 const STORAGE_KEY = 'noteReadingTrainerV1';
 
 // Recent-trouble boost. A missed note multiplies its pick weight by
-// (1 + TROUBLE_BOOST_MISS) — a x5 spike — and a correct answer notably
-// slower than the player's own rolling pace (beyond SLOW_TROUBLE_RATIO x the
-// per-mode baseline) keeps it at least at x(1 + TROUBLE_BOOST_SLOW). The
-// boost fades one step per fast correct answer on that note, so redemption
-// takes several clean reads, not one lucky hit.
+// (1 + TROUBLE_BOOST_MISS) — a x5 spike. A correct-but-slow answer is
+// graduated by exactly how slow, not a flat bump: crossing
+// SLOW_TROUBLE_RATIO x the player's own rolling pace sets at least
+// x(1 + TROUBLE_BOOST_SLOW_MIN), and every extra multiple of the baseline
+// beyond that adds TROUBLE_BOOST_SLOW_SLOPE more, up to TROUBLE_BOOST_SLOW_MAX
+// — so a note that's merely a bit slow gets a solid nudge, while one that's
+// consistently taking far longer than the rest spikes hard. The boost fades
+// one step per fast correct answer on that note (or jumps back up if the
+// next answer is slow again), so redemption takes several clean reads.
 const TROUBLE_BOOST_MISS = 4;
-const TROUBLE_BOOST_SLOW = 2;
+const TROUBLE_BOOST_SLOW_MIN = 3;
+const TROUBLE_BOOST_SLOW_SLOPE = 2;
+const TROUBLE_BOOST_SLOW_MAX = 7;
 const SLOW_TROUBLE_RATIO = 1.5;
 
 // A correct answer only counts as full mastery if it was quick; a slow-but-
@@ -554,10 +560,17 @@ function updateAfterAnswer(note, correct, elapsedMs) {
   // before this answer gets averaged in — the question is "slower than my
   // usual pace on the other notes", not "slower than a pace it just dragged
   // down itself".
-  const notablySlow = correct && (elapsedMs || 0) > SLOW_TROUBLE_RATIO * speedBaselineMs();
-  if (!correct) p.troubleBoost = TROUBLE_BOOST_MISS;
-  else if (notablySlow) p.troubleBoost = Math.max((p.troubleBoost || 0) - 1, TROUBLE_BOOST_SLOW);
-  else p.troubleBoost = Math.max(0, (p.troubleBoost || 0) - 1);
+  const baseline = speedBaselineMs();
+  const slowRatio = correct && baseline > 0 ? (elapsedMs || 0) / baseline : 0;
+  const decayed = Math.max(0, (p.troubleBoost || 0) - 1);
+  if (!correct) {
+    p.troubleBoost = TROUBLE_BOOST_MISS;
+  } else if (slowRatio > SLOW_TROUBLE_RATIO) {
+    const graduated = TROUBLE_BOOST_SLOW_MIN + TROUBLE_BOOST_SLOW_SLOPE * (slowRatio - SLOW_TROUBLE_RATIO);
+    p.troubleBoost = Math.min(TROUBLE_BOOST_SLOW_MAX, Math.max(decayed, graduated));
+  } else {
+    p.troubleBoost = decayed;
+  }
 
   state.stats.totalAttempts += 1;
   p.lastSeenAt = state.stats.totalAttempts;
@@ -1125,7 +1138,7 @@ function renderStats() {
       return;
     }
     const learning = entry.attempts < NOVELTY_ATTEMPTS;
-    const inTrouble = (entry.troubleBoost || 0) >= TROUBLE_BOOST_SLOW;
+    const inTrouble = (entry.troubleBoost || 0) >= TROUBLE_BOOST_SLOW_MIN;
     labelEl.textContent = (inTrouble ? '⚠️ ' : learning ? '✨ ' : '') + n.displayLabel;
     pctEl.textContent = (pickPcts.get(n.id) || 0) + '%';
     fillEl.style.width = Math.round(entry.ema * 100) + '%';
