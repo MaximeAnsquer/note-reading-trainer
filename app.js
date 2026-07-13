@@ -42,45 +42,19 @@ function midiNoteName(midiNumber) {
 }
 
 // How solidly the most-recently-unlocked note must be answered before the
-// next one appears. With EMA_ALPHA=0.35, a run of fast correct answers
-// crosses 0.6 ema by the 2nd attempt — new notes were arriving almost as
-// fast as they could be answered. Raising both makes attempts the binding
-// constraint for a fast learner (~8 solid reps before the next note, even if
-// mastery climbs past the bar sooner), so each note gets real practice time
-// on its own before the pool grows.
+// next one appears: enough attempts, a low enough error rate, and answered
+// close enough to the player's own pace (see unlockGate).
 const MIN_ATTEMPTS_TO_UNLOCK = 8;
-const UNLOCK_THRESHOLD = 0.8;
-const EMA_ALPHA = 0.35;
-// A miss stings harder than a success soothes: mastery falls faster on
-// errors than it climbs on correct answers, so one mistake visibly re-opens
-// work on that note (and drops it back into the review pool).
-const EMA_ALPHA_MISS = 0.5;
+const UNLOCK_MAX_ERROR_RATE = 0.15;
+const UNLOCK_MAX_SPEED_RATIO = 1.5;
 const STORAGE_KEY = 'noteReadingTrainerV1';
 
-// Recent-trouble boost. A missed note multiplies its pick weight by
-// (1 + TROUBLE_BOOST_MISS) — a x5 spike. A correct-but-slow answer is
-// graduated by exactly how slow, not a flat bump: crossing
-// SLOW_TROUBLE_RATIO x the player's own rolling pace sets at least
-// x(1 + TROUBLE_BOOST_SLOW_MIN), and every extra multiple of the baseline
-// beyond that adds TROUBLE_BOOST_SLOW_SLOPE more, up to TROUBLE_BOOST_SLOW_MAX
-// — so a note that's merely a bit slow gets a solid nudge, while one that's
-// consistently taking far longer than the rest spikes hard. The boost fades
-// one step per fast correct answer on that note (or jumps back up if the
-// next answer is slow again), so redemption takes several clean reads.
-const TROUBLE_BOOST_MISS = 4;
-const TROUBLE_BOOST_SLOW_MIN = 3;
-const TROUBLE_BOOST_SLOW_SLOPE = 2;
-const TROUBLE_BOOST_SLOW_MAX = 7;
-const SLOW_TROUBLE_RATIO = 1.5;
+// Below this many attempts a note is still "being introduced" — shown with a
+// ✨ badge — regardless of how those first few answers went, since a couple
+// of data points aren't enough to call an error rate reliable yet. Purely
+// informational: it doesn't feed the pick-weight formula.
+const LEARNING_ATTEMPTS = 6;
 
-// A correct answer only counts as full mastery if it was quick; a slow-but-
-// correct answer still counts (you did read the note right) but drags the
-// score down, since fluent sight-reading is as much about speed as accuracy.
-// "Quick" is relative to the player's own recent pace, tracked separately per
-// input mode: speech recognition adds latency a MIDI keystroke doesn't have,
-// and a fixed bar would misjudge one mode or the other. The clamps keep the
-// bar sane for very fast players and beginners alike.
-const MIN_CORRECT_SCORE = 0.5;
 const BASELINE_ALPHA = 0.12;
 const DEFAULT_BASELINE_MS = 2500;
 const BASELINE_SAMPLE_CAP_MS = 15000;
@@ -99,41 +73,6 @@ function fastAnswerMs() {
 
 function slowAnswerMs() {
   return fastAnswerMs() * SLOW_FACTOR;
-}
-
-// A freshly unlocked note gets a large pick-weight bonus that fades over its
-// first attempts, so new material shows up immediately and repeatedly while
-// it's being introduced instead of drowning in the growing practice pool.
-const NOVELTY_ATTEMPTS = 6;
-const NOVELTY_BONUS = 1.0;
-
-// Notes not asked for a while get a gentle boost (capped), so mastered notes
-// keep resurfacing for spaced review instead of disappearing forever once
-// their mastery weight bottoms out. Expressed as a fraction of the note's own
-// mastery weight (not a flat constant) so it can only nudge among notes that
-// are already similarly weighted — a long-untouched mastered note can never
-// leapfrog a note that's genuinely still weak, only other mastered notes.
-const STALENESS_FACTOR = 0.5;
-
-// Mastery weight is MASTERY_FLOOR + (1-ema)^MASTERY_EXPONENT. Counter-
-// intuitively, a HIGHER exponent collapses weight to the floor faster as ema
-// climbs, which flattens every well-mastered note (0.7-1.0) down to
-// indistinguishable near-floor values — exactly the "everything shows ~5%"
-// complaint. A lower exponent keeps (1-ema) decaying more gently, so the
-// gradient stays visible across the whole mastery range, right up near 1.0,
-// while the floor (kept tiny) still ensures a barely-mastered note pulls far
-// more weight than a near-perfect one.
-const MASTERY_EXPONENT = 3;
-const MASTERY_FLOOR = 0.001;
-
-function correctnessScore(correct, elapsedMs) {
-  if (!correct) return 0;
-  const fast = fastAnswerMs();
-  const slow = slowAnswerMs();
-  if (elapsedMs <= fast) return 1;
-  if (elapsedMs >= slow) return MIN_CORRECT_SCORE;
-  const t = (elapsedMs - fast) / (slow - fast);
-  return 1 - t * (1 - MIN_CORRECT_SCORE);
 }
 
 function buildNotes() {
@@ -209,7 +148,7 @@ function loadState() {
 
   const progress = {};
   NOTES.forEach((n) => {
-    progress[n.id] = { ema: 0.35, attempts: 0, unlocked: false };
+    progress[n.id] = { attempts: 0, misses: 0, unlocked: false };
   });
 
   const trebleFirst = NOTES.find((n) => n.clef === 'treble' && n.unlockOrder === 0);
@@ -346,7 +285,7 @@ function renderBatch(batch, currentIndex, doneMask) {
 function pickProbabilities() {
   const pool = practicePool();
   const poolMin = poolMinAvgMs(pool);
-  const weights = pool.map((n) => noteWeight(n, pool.length, poolMin));
+  const weights = pool.map((n) => noteWeight(n, poolMin));
   const total = weights.reduce((a, b) => a + b, 0);
   const map = new Map();
   if (total > 0) {
@@ -436,18 +375,32 @@ function unlockedNotesForPractice() {
   );
 }
 
-// In review mode the pool narrows to the notes that still need work: those
-// below the "mastered" bar. When fewer than REVIEW_MIN_POOL qualify, the
-// weakest mastered notes top the pool up so the drill keeps some variety
-// (and the mode stays useful even when everything is green).
-const REVIEW_EMA_THRESHOLD = 0.7;
+// Fraction of attempts on this note that were wrong. 0 for a never-tried
+// note — that absence of data is handled separately wherever it matters
+// (pick weight, review pool), not baked into this helper.
+function errorRateOf(p) {
+  return p.attempts ? (p.misses || 0) / p.attempts : 0;
+}
+
+// In review mode the pool narrows to the notes that most need work: a high
+// error rate, or a rolling average well behind the pool's fastest note
+// (whichever signal is worse). When fewer than REVIEW_MIN_POOL notes clear
+// the bar, the neediest ones top the pool up so the drill keeps some variety
+// (and the mode stays useful even when everything is solid).
+const REVIEW_NEED_THRESHOLD = 0.15;
 const REVIEW_MIN_POOL = 3;
 
 function practicePool() {
   const base = unlockedNotesForPractice();
   if (!state.reviewMode) return base;
-  const sorted = [...base].sort((a, b) => state.progress[a.id].ema - state.progress[b.id].ema);
-  const weak = sorted.filter((n) => state.progress[n.id].ema < REVIEW_EMA_THRESHOLD);
+  const poolMin = poolMinAvgMs(base);
+  const needScore = (n) => {
+    const p = state.progress[n.id];
+    if (!p.attempts) return 1; // no data yet: treat as needing review
+    return Math.max(errorRateOf(p), speedGapBoost(p, poolMin) / SPEED_GAP_FACTOR);
+  };
+  const sorted = [...base].sort((a, b) => needScore(b) - needScore(a));
+  const weak = sorted.filter((n) => needScore(n) > REVIEW_NEED_THRESHOLD);
   return weak.length >= REVIEW_MIN_POOL ? weak : sorted.slice(0, Math.min(REVIEW_MIN_POOL, sorted.length));
 }
 
@@ -470,8 +423,8 @@ function poolMinAvgMs(pool) {
 // that best time" — subtracting the floor before comparing, exactly so
 // that a note which is merely a little slower than the fastest doesn't
 // get lost against the fastest's own absolute time. A note with no
-// recorded average yet (never answered correctly) is neutral: it neither
-// gains nor loses from this factor, since NOVELTY_BONUS already covers it.
+// recorded average yet (never answered correctly) is neutral on this factor
+// alone; ERROR_WEIGHT_FLOOR below is what keeps it from vanishing.
 const SPEED_GAP_FACTOR = 4;
 const SPEED_GAP_MAX = 6;
 
@@ -481,29 +434,21 @@ function speedGapBoost(p, poolMin) {
   return Math.min(SPEED_GAP_MAX, SPEED_GAP_FACTOR * relativeGap);
 }
 
-// Pick weight combines four pressures:
-// - mastery gap: sharply favors notes still being missed; the small floor
-//   keeps mastered notes reachable without letting their combined weight
-//   (there can be many of them) drown out the few notes that need work;
-// - relative speed: notes whose average response time trails the pool's
-//   fastest note get pulled forward proportionally to that gap;
-// - novelty: freshly unlocked notes are drilled right away and often, fading
-//   back to normal over their first NOVELTY_ATTEMPTS attempts;
-// - staleness: notes unseen for roughly six laps of the pool earn the full
-//   (small) review bonus, so mastered notes still resurface periodically.
-function noteWeight(note, poolSize, poolMin) {
+// Pick weight is exactly two things, multiplied: how often you get this
+// note wrong, and how much slower you are on it than your best note in the
+// pool. Nothing else — no separate mastery score, no decay, no recency
+// spike. ERROR_WEIGHT_FLOOR keeps a note that's never been missed (or never
+// tried) from hitting literal zero, so it can still surface, driven purely
+// by the speed factor or by chance.
+const ERROR_WEIGHT_FLOOR = 0.02;
+
+function noteWeight(note, poolMin) {
   const p = state.progress[note.id];
-  const mastery = Math.pow(1 - p.ema, MASTERY_EXPONENT) + MASTERY_FLOOR;
-  // Clamped to 0: lastSeenAt should never exceed the current totalAttempts
-  // in normal play, but a mismatched imported save could have it happen,
-  // and a negative gap would flip staleness negative and corrupt the weight.
-  const gap = Math.max(0, state.stats.totalAttempts - (p.lastSeenAt || 0));
-  const horizon = Math.max(1, 6 * poolSize);
-  const staleness = STALENESS_FACTOR * Math.min(1, gap / horizon);
+  // No attempts yet: nothing to measure, so treat it like a fully-wrong
+  // note until real data comes in — it'll get drilled right away.
+  const errorWeight = (p.attempts ? errorRateOf(p) : 1) + ERROR_WEIGHT_FLOOR;
   const speedBoost = speedGapBoost(p, poolMin);
-  let w = mastery * (1 + staleness) * (1 + (p.troubleBoost || 0)) * (1 + speedBoost);
-  w += NOVELTY_BONUS * Math.max(0, 1 - p.attempts / NOVELTY_ATTEMPTS);
-  return w;
+  return errorWeight * (1 + speedBoost);
 }
 
 function pickNextNote(excludeId) {
@@ -516,7 +461,7 @@ function pickNextNote(excludeId) {
   }
 
   const poolMin = poolMinAvgMs(candidates);
-  const weights = candidates.map((n) => noteWeight(n, candidates.length, poolMin));
+  const weights = candidates.map((n) => noteWeight(n, poolMin));
   const total = weights.reduce((a, b) => a + b, 0);
   let r = Math.random() * total;
   for (let i = 0; i < candidates.length; i++) {
@@ -530,27 +475,40 @@ function pickNextNote(excludeId) {
 // unlocked. Unlocked notes don't necessarily form a contiguous prefix of the
 // sequence (widening the range added notes below already-unlocked ones), so
 // the next candidate is the lowest locked note, not seq[unlocked.length].
+// Full credit (1) once `actual` is at or under `limit` — this is a pass/fail
+// bar, not something to keep optimizing past — degrading gracefully toward 0
+// the further above it is. Using a hard "must reach 0" target instead would
+// make the bar effectively unreachable after a single lifetime miss, since a
+// misses/attempts ratio never returns to exactly 0 no matter how many
+// correct answers follow.
+function gateRatio(actual, limit) {
+  if (actual <= limit) return 1;
+  return Math.max(0, 1 - (actual - limit) / limit);
+}
+
 function unlockGate(clef) {
   const seq = NOTES.filter((n) => n.clef === clef).sort((a, b) => a.unlockOrder - b.unlockOrder);
   const unlocked = seq.filter((n) => state.progress[n.id].unlocked);
   const next = seq.find((n) => !state.progress[n.id].unlocked);
   if (!next || unlocked.length === 0) return null;
 
-  // Only the most recently unlocked note needs to be mastered — requiring
-  // every previously-unlocked note to stay simultaneously "ready" made later
-  // notes (often the same letter on another octave) take longer and longer
-  // to reach as the practice pool grew.
+  // Only the most recently unlocked note needs to be ready — requiring every
+  // previously-unlocked note to stay simultaneously "ready" made later notes
+  // (often the same letter on another octave) take longer and longer to
+  // reach as the practice pool grew. "Ready" means: enough attempts, a low
+  // enough error rate, and answered close enough to the player's own pace.
   const gate = state.progress[unlocked[unlocked.length - 1].id];
   const attemptsPart = Math.min(1, gate.attempts / MIN_ATTEMPTS_TO_UNLOCK);
-  const emaPart = Math.min(1, gate.ema / UNLOCK_THRESHOLD);
-  return { next, progress: Math.min(attemptsPart, emaPart) };
+  const errorPart = gateRatio(errorRateOf(gate), UNLOCK_MAX_ERROR_RATE);
+  const baseline = speedBaselineMs();
+  const speedPart = gate.avgMs == null ? 0 : gateRatio(gate.avgMs, UNLOCK_MAX_SPEED_RATIO * baseline);
+  return { next, progress: Math.min(attemptsPart, errorPart, speedPart) };
 }
 
 function maybeUnlockNext(clef) {
   const info = unlockGate(clef);
   if (!info || info.progress < 1) return null;
   state.progress[info.next.id].unlocked = true;
-  state.progress[info.next.id].ema = 0.35;
   return info.next;
 }
 
@@ -560,13 +518,15 @@ function todayKey(d = new Date()) {
   return `${d.getFullYear()}-${m}-${dd}`;
 }
 
-// 0-100 measure of overall reading level: total mastery across the full
-// range of notes, so it grows both by unlocking new notes and by
-// consolidating the ones already unlocked.
+// 0-100 measure of overall reading level: accuracy (1 - error rate) summed
+// across the full range of notes, so it grows both by unlocking new notes
+// and by cutting mistakes on the ones already unlocked. An unlocked note
+// with no attempts yet contributes 0, same as a locked one.
 function globalLevel() {
   const sum = NOTES.reduce((s, n) => {
     const p = state.progress[n.id];
-    return s + (p.unlocked ? p.ema : 0);
+    if (!p.unlocked || !p.attempts) return s;
+    return s + (1 - errorRateOf(p));
   }, 0);
   return Math.round((sum / NOTES.length) * 100);
 }
@@ -594,24 +554,6 @@ function updateAfterAnswer(note, correct, elapsedMs) {
   const p = state.progress[note.id];
   p.attempts += 1;
   if (!correct) p.misses = (p.misses || 0) + 1;
-  const score = correctnessScore(correct, elapsedMs || 0);
-  p.ema = p.ema + (correct ? EMA_ALPHA : EMA_ALPHA_MISS) * (score - p.ema);
-
-  // Trouble tracking. "Slow" compares against the baseline as it stood
-  // before this answer gets averaged in — the question is "slower than my
-  // usual pace on the other notes", not "slower than a pace it just dragged
-  // down itself".
-  const baseline = speedBaselineMs();
-  const slowRatio = correct && baseline > 0 ? (elapsedMs || 0) / baseline : 0;
-  const decayed = Math.max(0, (p.troubleBoost || 0) - 1);
-  if (!correct) {
-    p.troubleBoost = TROUBLE_BOOST_MISS;
-  } else if (slowRatio > SLOW_TROUBLE_RATIO) {
-    const graduated = TROUBLE_BOOST_SLOW_MIN + TROUBLE_BOOST_SLOW_SLOPE * (slowRatio - SLOW_TROUBLE_RATIO);
-    p.troubleBoost = Math.min(TROUBLE_BOOST_SLOW_MAX, Math.max(decayed, graduated));
-  } else {
-    p.troubleBoost = decayed;
-  }
 
   state.stats.totalAttempts += 1;
   p.lastSeenAt = state.stats.totalAttempts;
@@ -1106,10 +1048,18 @@ function onIncorrect(rawHeard, interpretedLabel, givenLabel) {
 
 // ---------- Stats UI ----------
 
-function masteryClass(entry) {
+// Color tier from the error rate alone: <10% error is solid, 10-30% still
+// needs work, above 30% needs real attention. A freshly-unlocked note with
+// no attempts yet is neither good nor bad — 'mid' until real data comes in.
+const ERROR_RATE_MID = 0.1;
+const ERROR_RATE_WEAK = 0.3;
+
+function noteStatusClass(entry) {
   if (!entry.unlocked) return 'locked';
-  if (entry.ema < 0.4) return 'weak';
-  if (entry.ema < 0.7) return 'mid';
+  if (!entry.attempts) return 'mid';
+  const rate = errorRateOf(entry);
+  if (rate > ERROR_RATE_WEAK) return 'weak';
+  if (rate >= ERROR_RATE_MID) return 'mid';
   return 'strong';
 }
 
@@ -1172,20 +1122,19 @@ function renderStats() {
   NOTES.forEach((n) => {
     const entry = state.progress[n.id];
     const { cell, labelEl, pctEl, fillEl } = statsCells.get(n.id);
-    cell.className = 'note-cell ' + masteryClass(entry);
+    cell.className = 'note-cell ' + noteStatusClass(entry);
     if (reviewIds && reviewIds.has(n.id)) cell.classList.add('in-review');
     if (!entry.unlocked) {
       labelEl.textContent = `🔒 ${n.displayLabel}`;
       return;
     }
-    const learning = entry.attempts < NOVELTY_ATTEMPTS;
-    const inTrouble = (entry.troubleBoost || 0) >= TROUBLE_BOOST_SLOW_MIN;
-    labelEl.textContent = (inTrouble ? '⚠️ ' : learning ? '✨ ' : '') + n.displayLabel;
+    const learning = entry.attempts < LEARNING_ATTEMPTS;
+    labelEl.textContent = (learning ? '✨ ' : '') + n.displayLabel;
     pctEl.textContent = (pickPcts.get(n.id) || 0) + '%';
-    fillEl.style.width = Math.round(entry.ema * 100) + '%';
+    const errorPct = entry.attempts ? Math.round(errorRateOf(entry) * 100) : 0;
+    fillEl.style.width = (entry.attempts ? Math.round((1 - errorRateOf(entry)) * 100) : 0) + '%';
     const avgPart = entry.avgMs ? ` · temps moyen ${(entry.avgMs / 1000).toFixed(1)}s` : '';
-    const troublePart = inTrouble ? ' · à retravailler (erreur ou lenteur récente)' : '';
-    cell.title = `${n.displayLabel} — maîtrise ${Math.round(entry.ema * 100)}% · ${entry.attempts} essai${entry.attempts > 1 ? 's' : ''}${avgPart}${troublePart}`;
+    cell.title = `${n.displayLabel} — taux d'erreur ${errorPct}% · ${entry.attempts} essai${entry.attempts > 1 ? 's' : ''}${avgPart}`;
   });
 
   // Flash the cell of the note that was just answered, so the eye is drawn
@@ -1227,20 +1176,17 @@ state.tableClefFilter = 'both';
 function noteTableRow(n, pickPcts) {
   const p = state.progress[n.id];
   const pickPct = pickPcts.get(n.id);
-  const errorRatePct = p.attempts ? Math.round(((p.misses || 0) / p.attempts) * 100) : null;
-  const inTrouble = p.unlocked && (p.troubleBoost || 0) >= TROUBLE_BOOST_SLOW_MIN;
-  const learning = p.unlocked && p.attempts < NOVELTY_ATTEMPTS;
+  const errorRatePct = p.attempts ? Math.round(errorRateOf(p) * 100) : null;
+  const learning = p.unlocked && p.attempts < LEARNING_ATTEMPTS;
   const status = !p.unlocked
     ? '🔒 Verrouillée'
-    : inTrouble
-      ? '⚠️ À retravailler'
-      : learning
-        ? '✨ Apprentissage'
-        : masteryClass(p) === 'weak'
-          ? 'Faible'
-          : masteryClass(p) === 'mid'
-            ? 'En progrès'
-            : 'Maîtrisée';
+    : learning
+      ? '✨ Apprentissage'
+      : noteStatusClass(p) === 'weak'
+        ? 'Faible'
+        : noteStatusClass(p) === 'mid'
+          ? 'En progrès'
+          : 'Maîtrisée';
 
   return {
     note: n,
@@ -1248,7 +1194,6 @@ function noteTableRow(n, pickPcts) {
     label: n.displayLabel,
     clef: n.clef === 'treble' ? 'Sol' : 'Fa',
     status,
-    mastery: p.unlocked ? Math.round(p.ema * 100) : null,
     pick: p.unlocked ? pickPct ?? 0 : null,
     errorRate: errorRatePct,
     avgMs: p.avgMs || null,
@@ -1281,7 +1226,6 @@ function renderNotesTable() {
         <td>${r.label}</td>
         <td>${r.clef}</td>
         <td>${r.status}</td>
-        <td>${r.mastery == null ? '—' : r.mastery + '%'}</td>
         <td>${r.pick == null ? '—' : r.pick + '%'}</td>
         <td>${r.errorRate == null ? '—' : r.errorRate + '%'}</td>
         <td>${r.avgMs == null ? '—' : (r.avgMs / 1000).toFixed(1) + 's'}</td>
@@ -1495,8 +1439,8 @@ function renderHeatmap() {
 
 function renderInsights() {
   const weak = unlockedNotes()
-    .filter((n) => state.progress[n.id].attempts > 0 && state.progress[n.id].ema < 0.7)
-    .sort((a, b) => state.progress[a.id].ema - state.progress[b.id].ema)
+    .filter((n) => state.progress[n.id].attempts > 0 && errorRateOf(state.progress[n.id]) >= ERROR_RATE_MID)
+    .sort((a, b) => errorRateOf(state.progress[b.id]) - errorRateOf(state.progress[a.id]))
     .slice(0, 3);
   const confusions = Object.entries(state.confusions)
     .sort((a, b) => b[1] - a[1])
@@ -1507,7 +1451,7 @@ function renderInsights() {
     html +=
       '<div class="insight-block"><div class="insight-title">🎯 À travailler</div>' +
       weak
-        .map((n) => `<span class="insight-chip">${n.displayLabel} · ${Math.round(state.progress[n.id].ema * 100)}%</span>`)
+        .map((n) => `<span class="insight-chip">${n.displayLabel} · ${Math.round(errorRateOf(state.progress[n.id]) * 100)}% d'erreur</span>`)
         .join('') +
       '</div>';
   }
@@ -1803,7 +1747,7 @@ resetBassBtn.addEventListener('click', () => {
   if (!ok) return;
 
   NOTES.filter((n) => n.clef === 'bass').forEach((n) => {
-    state.progress[n.id] = { ema: 0.35, attempts: 0, unlocked: false };
+    state.progress[n.id] = { attempts: 0, misses: 0, unlocked: false };
   });
   const first = NOTES.find((n) => n.clef === 'bass' && n.unlockOrder === 0);
   state.progress[first.id].unlocked = true;
