@@ -294,6 +294,8 @@ const midiDeviceStatusEl = document.getElementById('midiDeviceStatus');
 const listeningTextEl = document.getElementById('listeningText');
 const onscreenKeyboardEl = document.getElementById('onscreenKeyboard');
 const statsGridEl = document.getElementById('statsGrid');
+const notesTableBodyEl = document.getElementById('notesTableBody');
+const notesTableEl = document.getElementById('notesTable');
 const clefSwitcherEl = document.getElementById('clefSwitcher');
 const inputModeSwitcherEl = document.getElementById('inputModeSwitcher');
 
@@ -459,7 +461,10 @@ function practicePool() {
 function noteWeight(note, poolSize) {
   const p = state.progress[note.id];
   const mastery = Math.pow(1 - p.ema, MASTERY_EXPONENT) + MASTERY_FLOOR;
-  const gap = state.stats.totalAttempts - (p.lastSeenAt || 0);
+  // Clamped to 0: lastSeenAt should never exceed the current totalAttempts
+  // in normal play, but a mismatched imported save could have it happen,
+  // and a negative gap would flip staleness negative and corrupt the weight.
+  const gap = Math.max(0, state.stats.totalAttempts - (p.lastSeenAt || 0));
   const horizon = Math.max(1, 6 * poolSize);
   const staleness = STALENESS_FACTOR * Math.min(1, gap / horizon);
   let w = mastery * (1 + staleness) * (1 + (p.troubleBoost || 0));
@@ -553,6 +558,7 @@ function recordConfusion(note, givenLabel) {
 function updateAfterAnswer(note, correct, elapsedMs) {
   const p = state.progress[note.id];
   p.attempts += 1;
+  if (!correct) p.misses = (p.misses || 0) + 1;
   const score = correctnessScore(correct, elapsedMs || 0);
   p.ema = p.ema + (correct ? EMA_ALPHA : EMA_ALPHA_MISS) * (score - p.ema);
 
@@ -1169,7 +1175,106 @@ function renderStats() {
 
   // The review pool shifts as notes get consolidated; keep the hint fresh.
   if (state.reviewMode) applyPracticeModeUI();
+
+  renderNotesTable();
 }
+
+// ---------- Sortable notes table ----------
+
+// Missing data (locked note, or a metric with nothing recorded yet) sorts as
+// the lowest possible value, so those rows consistently cluster at one end
+// instead of scattering unpredictably through the middle of a sort.
+const NOTES_TABLE_MISSING = -1;
+
+state.tableSort = { key: 'pick', dir: 'desc' };
+
+function noteTableRow(n, pickPcts) {
+  const p = state.progress[n.id];
+  const pickPct = pickPcts.get(n.id);
+  const errorRatePct = p.attempts ? Math.round(((p.misses || 0) / p.attempts) * 100) : null;
+  const inTrouble = p.unlocked && (p.troubleBoost || 0) >= TROUBLE_BOOST_SLOW_MIN;
+  const learning = p.unlocked && p.attempts < NOVELTY_ATTEMPTS;
+  const status = !p.unlocked
+    ? '🔒 Verrouillée'
+    : inTrouble
+      ? '⚠️ À retravailler'
+      : learning
+        ? '✨ Apprentissage'
+        : masteryClass(p) === 'weak'
+          ? 'Faible'
+          : masteryClass(p) === 'mid'
+            ? 'En progrès'
+            : 'Maîtrisée';
+
+  return {
+    note: n,
+    unlocked: p.unlocked,
+    label: n.displayLabel,
+    clef: n.clef === 'treble' ? 'Sol' : 'Fa',
+    status,
+    mastery: p.unlocked ? Math.round(p.ema * 100) : null,
+    pick: p.unlocked ? pickPct ?? 0 : null,
+    errorRate: errorRatePct,
+    avgMs: p.avgMs || null,
+    attempts: p.attempts || 0,
+  };
+}
+
+function sortVal(row, key) {
+  const v = row[key];
+  if (key === 'label' || key === 'clef' || key === 'status') return v;
+  return v == null ? NOTES_TABLE_MISSING : v;
+}
+
+function renderNotesTable() {
+  const { key, dir } = state.tableSort;
+  const pickPcts = pickProbabilities();
+  const rows = NOTES.map((n) => noteTableRow(n, pickPcts)).sort((a, b) => {
+    const va = sortVal(a, key);
+    const vb = sortVal(b, key);
+    let cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+    return dir === 'asc' ? cmp : -cmp;
+  });
+
+  notesTableBodyEl.innerHTML = rows
+    .map((r) => {
+      const cls = r.unlocked ? '' : 'locked-row';
+      return `<tr class="${cls}">
+        <td>${r.label}</td>
+        <td>${r.clef}</td>
+        <td>${r.status}</td>
+        <td>${r.mastery == null ? '—' : r.mastery + '%'}</td>
+        <td>${r.pick == null ? '—' : r.pick + '%'}</td>
+        <td>${r.errorRate == null ? '—' : r.errorRate + '%'}</td>
+        <td>${r.avgMs == null ? '—' : (r.avgMs / 1000).toFixed(1) + 's'}</td>
+        <td>${r.attempts}</td>
+      </tr>`;
+    })
+    .join('');
+
+  notesTableEl.querySelectorAll('th').forEach((th) => {
+    th.classList.toggle('sorted', th.dataset.sort === key);
+    th.querySelector('.sort-arrow')?.remove();
+    if (th.dataset.sort === key) {
+      const arrow = document.createElement('span');
+      arrow.className = 'sort-arrow';
+      arrow.textContent = dir === 'asc' ? ' ▲' : ' ▼';
+      th.appendChild(arrow);
+    }
+  });
+}
+
+notesTableEl.querySelectorAll('th[data-sort]').forEach((th) => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    if (state.tableSort.key === key) {
+      state.tableSort.dir = state.tableSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      state.tableSort = { key, dir: key === 'label' || key === 'clef' || key === 'status' ? 'asc' : 'desc' };
+    }
+    renderNotesTable();
+  });
+});
 
 function updateTopbar() {
   streakValueEl.textContent = state.stats.streak;

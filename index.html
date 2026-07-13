@@ -105,11 +105,30 @@
           <span><i class="dot dot-mid"></i> En progrès</span>
           <span><i class="dot dot-strong"></i> Maîtrisée</span>
         </div>
+
+        <h3 class="table-title">Détail par note</h3>
+        <div class="table-scroll">
+          <table id="notesTable" class="notes-table">
+            <thead>
+              <tr>
+                <th data-sort="label">Note</th>
+                <th data-sort="clef">Clé</th>
+                <th data-sort="status">Statut</th>
+                <th data-sort="mastery">Maîtrise</th>
+                <th data-sort="pick">Probabilité</th>
+                <th data-sort="errorRate">Taux d'erreur</th>
+                <th data-sort="avgMs">Temps moyen</th>
+                <th data-sort="attempts">Essais</th>
+              </tr>
+            </thead>
+            <tbody id="notesTableBody"></tbody>
+          </table>
+        </div>
       </section>
     </main>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
-  <script src="app.js?v=37"></script>
+  <script src="app.js?v=39"></script>
 </body>
 </html>
