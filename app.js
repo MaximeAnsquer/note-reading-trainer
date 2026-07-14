@@ -304,7 +304,10 @@ function pickProbabilities() {
   const total = weights.reduce((a, b) => a + b, 0);
   const map = new Map();
   if (total > 0) {
-    pool.forEach((n, i) => map.set(n.id, Math.round((weights[i] / total) * 100)));
+    // One decimal, not a whole percent: two notes with genuinely different
+    // (but close) weights would otherwise round to the same displayed
+    // integer and look identical when they aren't.
+    pool.forEach((n, i) => map.set(n.id, Math.round((weights[i] / total) * 1000) / 10));
   }
   return map;
 }
@@ -1156,7 +1159,7 @@ function renderStats() {
     }
     const learning = entry.attempts < LEARNING_ATTEMPTS;
     labelEl.textContent = (learning ? '✨ ' : '') + n.displayLabel;
-    pctEl.textContent = (pickPcts.get(n.id) || 0) + '%';
+    pctEl.textContent = (pickPcts.get(n.id) || 0).toFixed(1) + '%';
     const errorPct = entry.attempts ? Math.round(errorRateOf(entry) * 100) : 0;
     fillEl.style.width = (entry.attempts ? Math.round((1 - errorRateOf(entry)) * 100) : 0) + '%';
     const avgPart = entry.avgMs ? ` · temps moyen ${(entry.avgMs / 1000).toFixed(1)}s` : '';
@@ -1252,7 +1255,7 @@ function renderNotesTable() {
         <td>${r.label}</td>
         <td>${r.clef}</td>
         <td>${r.status}</td>
-        <td>${r.pick == null ? '—' : r.pick + '%'}</td>
+        <td>${r.pick == null ? '—' : r.pick.toFixed(1) + '%'}</td>
         <td>${r.errorRate == null ? '—' : r.errorRate + '%'}</td>
         <td>${r.avgMs == null ? '—' : (r.avgMs / 1000).toFixed(1) + 's'}</td>
         <td>${r.attempts}</td>
