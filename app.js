@@ -437,9 +437,17 @@ function poolMinAvgMs(pool) {
 // avgMs, i.e. "how many times slower than my best note, as a fraction of
 // that best time" — subtracting the floor before comparing, exactly so
 // that a note which is merely a little slower than the fastest doesn't
-// get lost against the fastest's own absolute time.
+// get lost against the fastest's own absolute time. The cap is generous
+// (saturates only past ~26x the fastest note) rather than tight: this is
+// now the *only* signal
+// driving pick weight (see noteWeight), so a low cap made every note beyond
+// a modest gap saturate to the exact same weight — e.g. a note at 1.4s and
+// one at 2.5s both hitting the old cap of 6 and showing identical odds
+// despite a real, meaningful speed difference. It still exists purely to
+// stop one pathological outlier (a data glitch) from starving everything
+// else completely.
 const SPEED_GAP_FACTOR = 4;
-const SPEED_GAP_MAX = 6;
+const SPEED_GAP_MAX = 100;
 
 function speedGapBoost(p, poolMin) {
   if (p.avgMs == null || poolMin == null || poolMin <= 0) return 0;
