@@ -473,13 +473,18 @@ function noteWeight(note, poolMin) {
   return TIME_WEIGHT_FLOOR + speedGapBoost(p, poolMin);
 }
 
-function pickNextNote(excludeId) {
+// `excludeIds` may be a single id, a Set, or an array of ids to hard-exclude
+// (the previous note, and — from newBatch — every note already placed
+// earlier in the same batch, so the same exact note/octave never shows
+// twice among the notes on screen at once). Falls back to the full pool
+// when excluding would leave nothing to pick from, i.e. fewer distinct
+// notes are unlocked than are needed.
+function pickNextNote(excludeIds) {
+  const excludeSet = excludeIds instanceof Set ? excludeIds : new Set(excludeIds ? [excludeIds] : []);
   let candidates = practicePool();
-  // Hard-exclude the previous note so it never repeats back-to-back, unless
-  // it's genuinely the only note available yet.
-  if (excludeId && candidates.length > 1) {
-    const withoutPrevious = candidates.filter((n) => n.id !== excludeId);
-    if (withoutPrevious.length > 0) candidates = withoutPrevious;
+  if (excludeSet.size) {
+    const filtered = candidates.filter((n) => !excludeSet.has(n.id));
+    if (filtered.length > 0) candidates = filtered;
   }
 
   const poolMin = poolMinAvgMs(candidates);
@@ -978,11 +983,14 @@ const QUEUE_SIZE = 4;
 
 function newBatch() {
   const batch = [];
-  let prevId = state.lastNoteId;
+  // Seeded with the last note of the previous batch so the run doesn't
+  // repeat across the boundary either, then grown so every note already
+  // placed in this batch is excluded from the rest of it.
+  const usedIds = new Set(state.lastNoteId ? [state.lastNoteId] : []);
   for (let i = 0; i < QUEUE_SIZE; i++) {
-    const note = pickNextNote(prevId);
+    const note = pickNextNote(usedIds);
     batch.push(note);
-    prevId = note.id;
+    usedIds.add(note.id);
   }
   return batch;
 }
