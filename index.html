@@ -10,13 +10,17 @@
 <body>
   <div class="app">
     <header class="topbar">
-      <h1>🎼 Lecture de notes</h1>
+      <h1 id="appTitle">🎼 Lecture de notes</h1>
       <div class="topbar-stats">
-        <div class="stat"><span class="stat-value" id="streakValue">0</span><span class="stat-label">série</span></div>
-        <div class="stat"><span class="stat-value" id="bestStreakValue">0</span><span class="stat-label">record</span></div>
-        <div class="stat"><span class="stat-value" id="scoreValue">0 / 0</span><span class="stat-label">score</span></div>
-        <div class="stat"><span class="stat-value" id="avgSpeedValue">–</span><span class="stat-label">vitesse</span></div>
-        <div class="stat"><span class="stat-value" id="unlockedValue">2 / 34</span><span class="stat-label">notes débloquées</span></div>
+        <div class="stat"><span class="stat-value" id="streakValue">0</span><span class="stat-label" id="lblStreak">série</span></div>
+        <div class="stat"><span class="stat-value" id="bestStreakValue">0</span><span class="stat-label" id="lblRecord">record</span></div>
+        <div class="stat"><span class="stat-value" id="scoreValue">0 / 0</span><span class="stat-label" id="lblScore">score</span></div>
+        <div class="stat"><span class="stat-value" id="avgSpeedValue">–</span><span class="stat-label" id="lblSpeed">vitesse</span></div>
+        <div class="stat"><span class="stat-value" id="unlockedValue">2 / 34</span><span class="stat-label" id="lblUnlocked">notes débloquées</span></div>
+      </div>
+      <div class="clef-switcher lang-switcher" id="langSwitcher">
+        <button class="clef-btn active" data-lang="fr">🇫🇷 Français</button>
+        <button class="clef-btn" data-lang="en">🇬🇧 English</button>
       </div>
     </header>
 
@@ -70,7 +74,7 @@
 
       <section class="card progress-card">
         <div class="stats-header">
-          <h2>📈 Ta progression</h2>
+          <h2 id="progressTitle">📈 Ta progression</h2>
           <div class="clef-switcher chart-switcher" id="chartSwitcher">
             <button class="clef-btn active" data-metric="level">Niveau</button>
             <button class="clef-btn" data-metric="accuracy">Précision</button>
@@ -81,7 +85,7 @@
         <div id="todayChips" class="today-chips"></div>
         <div id="progressChart" class="progress-chart"></div>
         <div class="heatmap-wrap">
-          <div class="heatmap-title">Régularité — 12 dernières semaines</div>
+          <div class="heatmap-title" id="regularityTitle">Régularité — 12 dernières semaines</div>
           <div id="calendarHeatmap" class="heatmap"></div>
         </div>
         <div id="insights" class="insights hidden"></div>
@@ -89,7 +93,7 @@
 
       <section class="card stats-card">
         <div class="stats-header">
-          <h2>Progression par note</h2>
+          <h2 id="statsTitle">Progression par note</h2>
           <div class="stats-header-actions">
             <button id="exportBtn" class="btn btn-ghost btn-small">⬇️ Exporter</button>
             <button id="importBtn" class="btn btn-ghost btn-small">⬆️ Importer</button>
@@ -100,14 +104,14 @@
         </div>
         <div id="statsGrid" class="stats-grid"></div>
         <div class="legend">
-          <span><i class="dot dot-locked"></i> Pas encore débloquée</span>
-          <span><i class="dot dot-weak"></i> À travailler</span>
-          <span><i class="dot dot-mid"></i> En progrès</span>
-          <span><i class="dot dot-strong"></i> Maîtrisée</span>
+          <span><i class="dot dot-locked"></i> <span id="lblLegendLocked">Pas encore débloquée</span></span>
+          <span><i class="dot dot-weak"></i> <span id="lblLegendWeak">À travailler</span></span>
+          <span><i class="dot dot-mid"></i> <span id="lblLegendMid">En progrès</span></span>
+          <span><i class="dot dot-strong"></i> <span id="lblLegendStrong">Maîtrisée</span></span>
         </div>
 
         <div class="table-header">
-          <h3 class="table-title">Détail par note</h3>
+          <h3 class="table-title" id="tableTitle">Détail par note</h3>
           <div class="clef-switcher table-clef-filter" id="tableClefFilter">
             <button class="clef-btn active" data-clef="both">Les deux</button>
             <button class="clef-btn" data-clef="treble">Clé de Sol</button>
@@ -135,6 +139,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
-  <script src="app.js?v=48"></script>
+  <script src="app.js?v=49"></script>
 </body>
 </html>

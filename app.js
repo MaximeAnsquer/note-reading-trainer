@@ -1,7 +1,263 @@
-// ---------- Data model ----------
+// ---------- i18n ----------
 
+// French sight-reading uses solfège syllables (Do/Ré/Mi...); English music
+// education uses plain letter names (C/D/E...) — translating the solfège
+// word-for-word would be non-idiomatic, so the note-naming scheme itself
+// switches with the language, not just the surrounding UI text.
 const LETTER_TO_SOLFEGE = { C: 'do', D: 're', E: 'mi', F: 'fa', G: 'sol', A: 'la', B: 'si' };
 const DISPLAY_LABEL = { do: 'Do', re: 'Ré', mi: 'Mi', fa: 'Fa', sol: 'Sol', la: 'La', si: 'Si' };
+
+function lang() {
+  return state.settings.lang === 'en' ? 'en' : 'fr';
+}
+
+// Every user-facing string lives here. Values are either a plain string or a
+// function of whatever arguments the call site needs to interpolate. t()
+// falls back to French for a missing key so a partially-translated addition
+// never renders blank.
+const STRINGS = {
+  fr: {
+    appTitle: '🎼 Lecture de notes',
+    pageTitle: 'Lecture de notes — Entraînement',
+    streak: 'série',
+    record: 'record',
+    score: 'score',
+    speed: 'vitesse',
+    unlockedNotes: 'notes débloquées',
+    clefTreble: 'Clé de Sol',
+    clefBass: 'Clé de Fa',
+    clefBoth: 'Les deux',
+    clefShortTreble: 'Sol',
+    clefShortBass: 'Fa',
+    inputMic: '🎤 Micro',
+    inputMidi: '🎹 Clavier MIDI',
+    inputKeyboard: "🖱️ Piano à l'écran",
+    practiceNormal: '📚 Progression',
+    practiceReview: '🎯 Révision',
+    timerFree: '♾️ Libre',
+    timerMinutes: (n) => `${n} min`,
+    listeningMic: 'Je t’écoute…',
+    listeningMidi: 'Joue la note sur ton clavier…',
+    listeningKeyboard: 'Clique la note demandée ci-dessous…',
+    btnStart: '▶️ Commencer',
+    btnResume: '▶️ Reprendre',
+    btnRetryMic: '🎤 Réessayer',
+    btnSkip: '⏭ Passer',
+    btnPause: '⏸ Pause',
+    micUnsupported: "La reconnaissance vocale n'est pas disponible dans ce navigateur. Utilise Google Chrome sur ordinateur.",
+    midiUnsupported: "L'API MIDI n'est pas disponible dans ce navigateur. Utilise Google Chrome ou Edge sur ordinateur.",
+    midiDenied: '❌ Accès MIDI refusé. Autorise-le dans les réglages du site puis recharge la page.',
+    midiWaiting: "🎹 En attente d'autorisation MIDI…",
+    midiNoDevice: '⚠️ Aucun clavier MIDI détecté — branche-le et réessaie.',
+    midiConnected: (names) => `✅ Clavier connecté : ${names}`,
+    micBlocked: 'Le micro est bloqué. Autorise-le dans ton navigateur puis clique sur Réessayer.',
+    micError: (err) => `Erreur micro (${err}). Clique sur Réessayer.`,
+    micServiceDown:
+      "Le service de reconnaissance vocale de Chrome ne répond pas (souvent un pare-feu/VPN/antivirus qui bloque la connexion à Google). Essaie Edge, ou vérifie ta connexion, puis clique sur Réessayer.",
+    micNoResponse: 'Pas de réponse du micro, on réessaie…',
+    micUnintelligible: '(rien de compréhensible)',
+    micSilence: '(silence)',
+    progressTitle: '📈 Ta progression',
+    chartLevel: 'Niveau',
+    chartAccuracy: 'Précision',
+    chartSpeed: 'Vitesse',
+    chartVolume: 'Volume',
+    chartTitleLevel: 'Niveau global (0–100)',
+    chartTitleAccuracy: 'Précision (%)',
+    chartTitleSpeed: 'Temps de réponse moyen (s) — plus bas = mieux',
+    chartTitleVolume: 'Notes travaillées par jour',
+    chartEmpty: 'Joue quelques notes pour commencer à tracer ta courbe 📈',
+    chartEmptyOneDay: 'Reviens demain pour voir ta courbe évoluer 🌱',
+    regularityTitle: 'Régularité — 12 dernières semaines',
+    chipNotesToday: (n) => `🎵 <b>${n}</b> note${n > 1 ? 's' : ''} aujourd'hui`,
+    chipAccuracy: (acc) => `🎯 <b>${acc}</b> précision`,
+    chipPerNote: (spd) => `⚡ <b>${spd}</b> par note`,
+    chipLevel: (lvl) => `📈 Niveau <b>${lvl}</b>`,
+    chipStreakDays: (n) => `🔥 <b>${n}</b> jour${n > 1 ? 's' : ''} d'affilée`,
+    heatmapTooltip: (date, n) => `${date} — ${n} note${n > 1 ? 's' : ''}`,
+    insightToWork: '🎯 À travailler',
+    insightErrorRate: (pct) => `${pct}% d'erreur`,
+    insightConfusions: '🔀 Confusions fréquentes',
+    statsTitle: 'Progression par note',
+    btnExport: '⬇️ Exporter',
+    btnImport: '⬆️ Importer',
+    btnResetBass: 'Réinitialiser clé de Fa',
+    btnReset: 'Réinitialiser',
+    legendLocked: 'Pas encore débloquée',
+    legendWeak: 'À travailler',
+    legendMid: 'En progrès',
+    legendStrong: 'Maîtrisée',
+    lockedCell: (label) => `🔒 ${label}`,
+    learningBadge: (label) => `✨ ${label}`,
+    cellTooltip: (label, errorPct, attempts, avgPart) =>
+      `${label} — taux d'erreur ${errorPct}% · ${attempts} essai${attempts > 1 ? 's' : ''}${avgPart}`,
+    avgTimeSuffix: (s) => ` · temps moyen ${s}s`,
+    statusLocked: 'Verrouillée',
+    statusLearning: '✨ Apprentissage',
+    statusWeak: 'Faible',
+    statusMid: 'En progrès',
+    statusStrong: 'Maîtrisée',
+    tableTitle: 'Détail par note',
+    thNote: 'Note',
+    thClef: 'Clé',
+    thStatus: 'Statut',
+    thPick: 'Probabilité',
+    thError: "Taux d'erreur",
+    thAvg: 'Temps moyen',
+    thAttempts: 'Essais',
+    nextUnlockPaused: 'Déblocages en pause (révision)',
+    nextUnlockInfo: (label, pct) => `Prochaine : ${label} · ${pct}%`,
+    nextUnlockAllDone: 'Toutes débloquées 🎉',
+    reviewHint: (n, labels) => `🎯 Révision : uniquement tes ${n} notes les plus fragiles (${labels}) — pas de nouveaux déblocages.`,
+    sessionTimerRemaining: (t) => `⏱️ ${t} restantes`,
+    sessionSummaryTitle: '⏱️ Temps écoulé — bilan de la session',
+    sessionSummaryNotes: (n) => `🎵 <b>${n}</b> note${n > 1 ? 's' : ''}`,
+    sessionSummaryAccuracy: (pct) => `🎯 <b>${pct}%</b> précision`,
+    sessionSummaryUnlocked: (n) => `🔓 <b>${n >= 0 ? '+' : ''}${n}</b> débloquée${Math.abs(n) > 1 ? 's' : ''}`,
+    sessionSummaryLevel: (n) => `📈 Niveau <b>${n >= 0 ? '+' : ''}${n}</b>`,
+    feedbackCorrect: (label, time, speedEmoji, milestone) => `✅ ${label} (${time}${speedEmoji})${milestone}`,
+    milestoneStreak: (n) => ` · 🔥 ${n} d'affilée !`,
+    feedbackIncorrect: (source, heard, understood) => `❌ ${source} : "${heard}"${understood}`,
+    understood: (label) => ` (compris : ${label})`,
+    sourceMic: 'Micro a entendu',
+    sourceKeyboard: 'Clavier a joué',
+    pausedMessage: 'En pause. Clique sur Reprendre pour continuer.',
+    confirmReset: 'Réinitialiser toute ta progression ? Cette action est irréversible.',
+    confirmResetBass:
+      "Réinitialiser ta progression en clé de Fa ? Tu repartiras de Fa₃ (la note au centre de la clé), puis les notes les plus proches se débloqueront en premier. La clé de Sol n'est pas touchée. Cette action est irréversible.",
+    resetBassDone: (label) => `✅ Clé de Fa réinitialisée. Tu repars de ${label}.`,
+    confirmImport: 'Importer cette sauvegarde va remplacer ta progression actuelle sur cet appareil. Continuer ?',
+    invalidFile: "Ce fichier n'est pas une sauvegarde valide (JSON illisible).",
+    invalidProgress: 'Ce fichier ne contient pas de progression reconnaissable.',
+    importSuccess: '✅ Progression importée avec succès.',
+    langLabel: 'Langue',
+    langFr: '🇫🇷 Français',
+    langEn: '🇬🇧 English',
+  },
+  en: {
+    appTitle: '🎼 Note Reading',
+    pageTitle: 'Note Reading — Practice',
+    streak: 'streak',
+    record: 'best',
+    score: 'score',
+    speed: 'speed',
+    unlockedNotes: 'notes unlocked',
+    clefTreble: 'Treble Clef',
+    clefBass: 'Bass Clef',
+    clefBoth: 'Both',
+    clefShortTreble: 'Treble',
+    clefShortBass: 'Bass',
+    inputMic: '🎤 Mic',
+    inputMidi: '🎹 MIDI Keyboard',
+    inputKeyboard: '🖱️ On-screen Piano',
+    practiceNormal: '📚 Progress',
+    practiceReview: '🎯 Review',
+    timerFree: '♾️ Free',
+    timerMinutes: (n) => `${n} min`,
+    listeningMic: 'Listening…',
+    listeningMidi: 'Play the note on your keyboard…',
+    listeningKeyboard: 'Click the requested note below…',
+    btnStart: '▶️ Start',
+    btnResume: '▶️ Resume',
+    btnRetryMic: '🎤 Retry',
+    btnSkip: '⏭ Skip',
+    btnPause: '⏸ Pause',
+    micUnsupported: 'Speech recognition is not available in this browser. Use Google Chrome on desktop.',
+    midiUnsupported: 'The MIDI API is not available in this browser. Use Google Chrome or Edge on desktop.',
+    midiDenied: '❌ MIDI access denied. Allow it in the site settings, then reload the page.',
+    midiWaiting: '🎹 Waiting for MIDI permission…',
+    midiNoDevice: '⚠️ No MIDI keyboard detected — plug it in and try again.',
+    midiConnected: (names) => `✅ Keyboard connected: ${names}`,
+    micBlocked: 'The mic is blocked. Allow it in your browser, then click Retry.',
+    micError: (err) => `Mic error (${err}). Click Retry.`,
+    micServiceDown:
+      "Chrome's speech recognition service isn't responding (often a firewall/VPN/antivirus blocking the connection to Google). Try Edge, or check your connection, then click Retry.",
+    micNoResponse: 'No response from the mic, retrying…',
+    micUnintelligible: '(nothing understandable)',
+    micSilence: '(silence)',
+    progressTitle: '📈 Your progress',
+    chartLevel: 'Level',
+    chartAccuracy: 'Accuracy',
+    chartSpeed: 'Speed',
+    chartVolume: 'Volume',
+    chartTitleLevel: 'Overall level (0–100)',
+    chartTitleAccuracy: 'Accuracy (%)',
+    chartTitleSpeed: 'Average response time (s) — lower is better',
+    chartTitleVolume: 'Notes practiced per day',
+    chartEmpty: 'Play a few notes to start tracing your curve 📈',
+    chartEmptyOneDay: 'Come back tomorrow to see your curve grow 🌱',
+    regularityTitle: 'Consistency — last 12 weeks',
+    chipNotesToday: (n) => `🎵 <b>${n}</b> note${n > 1 ? 's' : ''} today`,
+    chipAccuracy: (acc) => `🎯 <b>${acc}</b> accuracy`,
+    chipPerNote: (spd) => `⚡ <b>${spd}</b> per note`,
+    chipLevel: (lvl) => `📈 Level <b>${lvl}</b>`,
+    chipStreakDays: (n) => `🔥 <b>${n}</b> day${n > 1 ? 's' : ''} in a row`,
+    heatmapTooltip: (date, n) => `${date} — ${n} note${n > 1 ? 's' : ''}`,
+    insightToWork: '🎯 Needs work',
+    insightErrorRate: (pct) => `${pct}% error`,
+    insightConfusions: '🔀 Frequent mix-ups',
+    statsTitle: 'Progress by note',
+    btnExport: '⬇️ Export',
+    btnImport: '⬆️ Import',
+    btnResetBass: 'Reset bass clef',
+    btnReset: 'Reset',
+    legendLocked: 'Not unlocked yet',
+    legendWeak: 'Needs work',
+    legendMid: 'In progress',
+    legendStrong: 'Solid',
+    lockedCell: (label) => `🔒 ${label}`,
+    learningBadge: (label) => `✨ ${label}`,
+    cellTooltip: (label, errorPct, attempts, avgPart) =>
+      `${label} — error rate ${errorPct}% · ${attempts} attempt${attempts > 1 ? 's' : ''}${avgPart}`,
+    avgTimeSuffix: (s) => ` · avg time ${s}s`,
+    statusLocked: 'Locked',
+    statusLearning: '✨ Learning',
+    statusWeak: 'Needs work',
+    statusMid: 'In progress',
+    statusStrong: 'Solid',
+    tableTitle: 'Detail by note',
+    thNote: 'Note',
+    thClef: 'Clef',
+    thStatus: 'Status',
+    thPick: 'Probability',
+    thError: 'Error rate',
+    thAvg: 'Avg. time',
+    thAttempts: 'Attempts',
+    nextUnlockPaused: 'Unlocks paused (review)',
+    nextUnlockInfo: (label, pct) => `Next: ${label} · ${pct}%`,
+    nextUnlockAllDone: 'All unlocked 🎉',
+    reviewHint: (n, labels) => `🎯 Review: only your ${n} shakiest notes (${labels}) — no new unlocks.`,
+    sessionTimerRemaining: (t) => `⏱️ ${t} remaining`,
+    sessionSummaryTitle: '⏱️ Time’s up — session summary',
+    sessionSummaryNotes: (n) => `🎵 <b>${n}</b> note${n > 1 ? 's' : ''}`,
+    sessionSummaryAccuracy: (pct) => `🎯 <b>${pct}%</b> accuracy`,
+    sessionSummaryUnlocked: (n) => `🔓 <b>${n >= 0 ? '+' : ''}${n}</b> unlocked`,
+    sessionSummaryLevel: (n) => `📈 Level <b>${n >= 0 ? '+' : ''}${n}</b>`,
+    feedbackCorrect: (label, time, speedEmoji, milestone) => `✅ ${label} (${time}${speedEmoji})${milestone}`,
+    milestoneStreak: (n) => ` · 🔥 ${n} in a row!`,
+    feedbackIncorrect: (source, heard, understood) => `❌ ${source}: "${heard}"${understood}`,
+    understood: (label) => ` (heard as: ${label})`,
+    sourceMic: 'Mic heard',
+    sourceKeyboard: 'Keyboard played',
+    pausedMessage: 'Paused. Click Resume to continue.',
+    confirmReset: 'Reset all your progress? This action is irreversible.',
+    confirmResetBass:
+      "Reset your bass clef progress? You'll start over from F3 (the note at the clef's center), then the closest notes will unlock first. The treble clef isn't affected. This action is irreversible.",
+    resetBassDone: (label) => `✅ Bass clef reset. Starting over from ${label}.`,
+    confirmImport: 'Importing this save will replace your current progress on this device. Continue?',
+    invalidFile: 'This file is not a valid save (unreadable JSON).',
+    invalidProgress: "This file doesn't contain recognizable progress.",
+    importSuccess: '✅ Progress imported successfully.',
+    langLabel: 'Language',
+    langFr: '🇫🇷 Français',
+    langEn: '🇬🇧 English',
+  },
+};
+
+function t(key, ...args) {
+  const entry = STRINGS[lang()][key] ?? STRINGS.fr[key];
+  return typeof entry === 'function' ? entry(...args) : entry;
+}
 
 // Bottom-to-top note order for each clef: the 9 staff positions plus up to
 // three ledger lines on each side, which stretches the readable range a bit
@@ -16,10 +272,12 @@ const BASS_KEYS = [
   'e/3', 'f/3', 'g/3', 'a/3', 'b/3', 'c/4', 'd/4', 'e/4', 'f/4', 'g/4',
 ];
 
-// Words the speech recognizer commonly substitutes for each syllable, because
-// "do/ré/mi/fa" aren't ordinary French words and get auto-corrected toward
-// nearby real ones. Keep entries distinct across notes to avoid cross-matches.
-const SYNONYMS = {
+// Words the speech recognizer commonly substitutes for each syllable/letter,
+// because short, non-dictionary sounds ("do/ré/mi/fa", or a single spoken
+// letter) get auto-corrected toward nearby real words. Keep entries distinct
+// across notes to avoid cross-matches. Keyed by solfège syllable in French,
+// by letter (lowercase) in English.
+const SYNONYMS_FR = {
   do: ['do', 'dot', 'dos', 'doh', 'deau', 'dau', 'daux', 'dou', 'doux', 'tout', 'dodo'],
   re: ['re', 'rez', 'raie', 'rey', 'rai', 'ret', 'raid', 'erre', 'rue', 'roue', 'ray', 'rets', 'rep'],
   mi: ['mi', 'mie', 'mit', 'mis', 'mix', 'amie', 'ami', 'midi', 'mini', 'mythe', 'nuit'],
@@ -29,16 +287,31 @@ const SYNONYMS = {
   si: ['si', 'scie', 'ci', 'cis', 'sit', 'sy', 'six', 'sil'],
 };
 
+const SYNONYMS_EN = {
+  a: ['a', 'ay', 'eh', 'aye'],
+  b: ['b', 'be', 'bee', 'bea'],
+  c: ['c', 'see', 'sea', 'si'],
+  d: ['d', 'dee'],
+  e: ['e', 'ee', 'eee'],
+  f: ['f', 'eff', 'ef'],
+  g: ['g', 'gee', 'jee'],
+};
+
 // MIDI note number 60 = C4 (middle C) by convention; pitch class is the
 // number mod 12. Only natural (white-key) pitch classes map to a letter —
 // sharps/flats never match, since the staff notes we teach are all naturals.
 const MIDI_PITCH_CLASS_TO_LETTER = { 0: 'C', 2: 'D', 4: 'E', 5: 'F', 7: 'G', 9: 'A', 11: 'B' };
-const MIDI_DISPLAY_NAMES = ['Do', 'Do♯', 'Ré', 'Ré♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si'];
+const MIDI_DISPLAY_NAMES_FR = ['Do', 'Do♯', 'Ré', 'Ré♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si'];
+const MIDI_DISPLAY_NAMES_EN = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+
+function midiDisplayName(pitchClass) {
+  return (lang() === 'en' ? MIDI_DISPLAY_NAMES_EN : MIDI_DISPLAY_NAMES_FR)[pitchClass];
+}
 
 function midiNoteName(midiNumber) {
   const pitchClass = ((midiNumber % 12) + 12) % 12;
   const octave = Math.floor(midiNumber / 12) - 1;
-  return `${MIDI_DISPLAY_NAMES[pitchClass]}${toSubscript(octave)}`;
+  return `${midiDisplayName(pitchClass)}${toSubscript(octave)}`;
 }
 
 // How solidly the most-recently-unlocked note must be answered before the
@@ -106,9 +379,19 @@ function makeNote(clef, key, order) {
     octave,
     order,
     solfege,
-    label: DISPLAY_LABEL[solfege],
-    displayLabel: `${DISPLAY_LABEL[solfege]}${toSubscript(octave)}`,
   };
+}
+
+// Note naming is language-dependent (solfège in French, letter names in
+// English — see the i18n section above), so it's computed on demand from
+// the language-independent `letter`/`solfege`/`octave` rather than baked
+// into the note object at creation time.
+function noteLabel(n) {
+  return lang() === 'en' ? n.letter : DISPLAY_LABEL[n.solfege];
+}
+
+function noteDisplayLabel(n) {
+  return `${noteLabel(n)}${toSubscript(n.octave)}`;
 }
 
 const NOTES = buildNotes();
@@ -163,7 +446,7 @@ function loadState() {
   progress[bassFirst.id].unlocked = true;
 
   const stats = { totalAttempts: 0, totalCorrect: 0, streak: 0, bestStreak: 0, speedBaseline: {} };
-  const settings = { clefMode: 'both', inputMode: 'midi', sessionMinutes: 0 };
+  const settings = { clefMode: 'both', inputMode: 'midi', sessionMinutes: 0, lang: 'fr' };
 
   if (saved && saved.progress) {
     Object.keys(progress).forEach((id) => {
@@ -573,7 +856,7 @@ function practiceStreakDays() {
 
 function recordConfusion(note, givenLabel) {
   if (!givenLabel) return;
-  const key = `${note.displayLabel} → ${givenLabel}`;
+  const key = `${noteDisplayLabel(note)} → ${givenLabel}`;
   state.confusions[key] = (state.confusions[key] || 0) + 1;
 }
 
@@ -657,7 +940,12 @@ function wordVariants(word) {
   return [...variants];
 }
 
-function findSpokenSolfege(words) {
+// Returns the spoken note's key — a solfège syllable in French ('do', 're',
+// ...), a lowercase letter in English ('c', 'd', ...) — or null. Compare
+// against a note with spokenKeyMatches(); render for display with
+// spokenKeyLabel().
+function findSpokenKey(words) {
+  const synonyms = lang() === 'en' ? SYNONYMS_EN : SYNONYMS_FR;
   // Also try adjacent-word concatenations: elisions like "d'eau" or "s'y" get
   // split into separate words ("d", "eau") once punctuation is stripped.
   const tokens = [...words];
@@ -666,14 +954,22 @@ function findSpokenSolfege(words) {
   }
 
   const candidates = new Set();
-  tokens.forEach((t) => wordVariants(t).forEach((v) => candidates.add(v)));
+  tokens.forEach((tok) => wordVariants(tok).forEach((v) => candidates.add(v)));
 
   for (const token of candidates) {
-    for (const key of Object.keys(SYNONYMS)) {
-      if (SYNONYMS[key].includes(token)) return key;
+    for (const key of Object.keys(synonyms)) {
+      if (synonyms[key].includes(token)) return key;
     }
   }
   return null;
+}
+
+function spokenKeyMatches(key, note) {
+  return lang() === 'en' ? key === note.letter.toLowerCase() : key === note.solfege;
+}
+
+function spokenKeyLabel(key) {
+  return lang() === 'en' ? key.toUpperCase() : DISPLAY_LABEL[key];
 }
 
 function setupRecognition() {
@@ -681,7 +977,6 @@ function setupRecognition() {
     return false;
   }
   recognition = new SpeechRecognitionCtor();
-  recognition.lang = 'fr-FR';
   recognition.continuous = false;
   recognition.interimResults = false;
   recognition.maxAlternatives = 5;
@@ -691,19 +986,19 @@ function setupRecognition() {
     state.silentEndStreak = 0;
     const results = event.results && event.results[0];
     if (!results || results.length === 0) {
-      onIncorrect('(rien de compréhensible)', null);
+      onIncorrect(t('micUnintelligible'), null);
       return;
     }
 
     let matched = null;
     let interpretedLabel = null;
-    const rawTranscript = results[0].transcript.trim() || '(silence)';
+    const rawTranscript = results[0].transcript.trim() || t('micSilence');
 
     for (let i = 0; i < results.length; i++) {
       const words = normalizeWords(results[i].transcript);
-      const spoken = findSpokenSolfege(words);
-      if (!interpretedLabel && spoken) interpretedLabel = DISPLAY_LABEL[spoken];
-      if (spoken === state.currentNote.solfege) {
+      const spoken = findSpokenKey(words);
+      if (!interpretedLabel && spoken) interpretedLabel = spokenKeyLabel(spoken);
+      if (spoken && spokenKeyMatches(spoken, state.currentNote)) {
         matched = spoken;
         break;
       }
@@ -740,13 +1035,13 @@ function setupRecognition() {
     state.silentEndStreak = 0;
     setListening(false);
     if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      setFeedback('Le micro est bloqué. Autorise-le dans ton navigateur puis clique sur Réessayer.', 'error');
+      setFeedback(t('micBlocked'), 'error');
       state.autoMode = false;
       micBtn.classList.remove('hidden');
     } else if (event.error === 'aborted') {
       // user- or code-triggered stop, nothing to do
     } else {
-      setFeedback('Erreur micro (' + event.error + '). Clique sur Réessayer.', 'error');
+      setFeedback(t('micError', event.error), 'error');
       state.autoMode = false;
       micBtn.classList.remove('hidden');
     }
@@ -762,14 +1057,11 @@ function setupRecognition() {
       state.awaitingResult = false;
       state.silentEndStreak = (state.silentEndStreak || 0) + 1;
       if (state.silentEndStreak >= 2) {
-        setFeedback(
-          "Le service de reconnaissance vocale de Chrome ne répond pas (souvent un pare-feu/VPN/antivirus qui bloque la connexion à Google). Essaie Edge, ou vérifie ta connexion, puis clique sur Réessayer.",
-          'error'
-        );
+        setFeedback(t('micServiceDown'), 'error');
         state.autoMode = false;
         micBtn.classList.remove('hidden');
       } else {
-        setFeedback("Pas de réponse du micro, on réessaie…", 'error');
+        setFeedback(t('micNoResponse'), 'error');
         if (state.autoMode) setTimeout(() => startListening(), 700);
       }
     }
@@ -784,6 +1076,10 @@ function startListening() {
   try {
     micBtn.classList.add('hidden');
     state.awaitingResult = true;
+    // Set right before each start (not once at setup) so a language switch
+    // takes effect on the next attempt without needing to recreate the
+    // recognition object.
+    recognition.lang = lang() === 'en' ? 'en-US' : 'fr-FR';
     recognition.start();
     setListening(true);
   } catch (e) {
@@ -842,7 +1138,7 @@ function handleNotePlayed(midiNumber) {
   if (letter && letter === state.currentNote.letter) {
     onCorrect();
   } else {
-    onIncorrect(label, null, MIDI_DISPLAY_NAMES[pitchClass]);
+    onIncorrect(label, null, midiDisplayName(pitchClass));
   }
 }
 
@@ -865,23 +1161,22 @@ function updateMidiDeviceStatusUI() {
 
   if (state.midiPermissionDenied) {
     midiDeviceStatusEl.className = 'midi-status missing';
-    midiDeviceStatusEl.textContent =
-      "❌ Accès MIDI refusé. Autorise-le dans les réglages du site puis recharge la page.";
+    midiDeviceStatusEl.textContent = t('midiDenied');
     return;
   }
   if (!midiAccess) {
     midiDeviceStatusEl.className = 'midi-status missing';
-    midiDeviceStatusEl.textContent = "🎹 En attente d'autorisation MIDI…";
+    midiDeviceStatusEl.textContent = t('midiWaiting');
     return;
   }
 
   const inputs = [...midiAccess.inputs.values()];
   if (inputs.length === 0) {
     midiDeviceStatusEl.className = 'midi-status missing';
-    midiDeviceStatusEl.textContent = '⚠️ Aucun clavier MIDI détecté — branche-le et réessaie.';
+    midiDeviceStatusEl.textContent = t('midiNoDevice');
   } else {
     midiDeviceStatusEl.className = 'midi-status connected';
-    midiDeviceStatusEl.textContent = `✅ Clavier connecté : ${inputs.map((i) => i.name).join(', ')}`;
+    midiDeviceStatusEl.textContent = t('midiConnected', inputs.map((i) => i.name).join(', '));
   }
 }
 
@@ -925,9 +1220,9 @@ function applyInputModeUI() {
   unsupportedMsg.classList.toggle('hidden', !(isMic && !state.micSupported));
   midiUnsupportedMsg.classList.toggle('hidden', !(isMidi && !state.midiSupported));
 
-  if (isMic) listeningTextEl.textContent = "Je t'écoute…";
-  else if (isMidi) listeningTextEl.textContent = 'Joue la note sur ton clavier…';
-  else listeningTextEl.textContent = 'Clique la note demandée ci-dessous…';
+  if (isMic) listeningTextEl.textContent = t('listeningMic');
+  else if (isMidi) listeningTextEl.textContent = t('listeningMidi');
+  else listeningTextEl.textContent = t('listeningKeyboard');
 
   updateMidiDeviceStatusUI();
 
@@ -1050,8 +1345,8 @@ function onCorrect() {
   // into a live cell) rather than interrupting the answer flow or timing.
   updateAfterAnswer(note, true, elapsedMs);
   const streak = state.stats.streak;
-  const milestone = streak > 0 && streak % 10 === 0 ? ` · 🔥 ${streak} d'affilée !` : '';
-  setFeedback(`✅ ${note.label} (${elapsedLabel}${speed})${milestone}`, 'success');
+  const milestone = streak > 0 && streak % 10 === 0 ? t('milestoneStreak', streak) : '';
+  setFeedback(t('feedbackCorrect', noteLabel(note), elapsedLabel, speed, milestone), 'success');
   updateTopbar();
   advanceAfterCorrect();
   if (state.autoMode) beginRound();
@@ -1059,12 +1354,12 @@ function onCorrect() {
 
 function onIncorrect(rawHeard, interpretedLabel, givenLabel) {
   const note = state.currentNote;
-  const interpretation = interpretedLabel && interpretedLabel !== rawHeard ? ` (compris : ${interpretedLabel})` : '';
-  const source = state.settings.inputMode === 'mic' ? 'Micro a entendu' : 'Clavier a joué';
+  const interpretation = interpretedLabel && interpretedLabel !== rawHeard ? t('understood', interpretedLabel) : '';
+  const source = state.settings.inputMode === 'mic' ? t('sourceMic') : t('sourceKeyboard');
   // Deliberately doesn't name the correct note: it's a sight-reading drill,
   // so the answer must come from re-reading the (now red) staff, not from
   // being told the label in text.
-  setFeedback(`❌ ${source} : "${rawHeard}"${interpretation}`, 'error');
+  setFeedback(t('feedbackIncorrect', source, rawHeard, interpretation), 'error');
   // What the player answered instead: the played pitch (MIDI/keyboard) or the
   // understood syllable (mic). Silence/noise isn't a confusion and passes null.
   recordConfusion(note, givenLabel || interpretedLabel);
@@ -1106,19 +1401,19 @@ function noteStatusClass(entry) {
 const statsCells = new Map(); // note id -> { cell, labelEl, pctEl, fillEl }
 const nextUnlockEls = {}; // clef -> element showing next-unlock progress
 
+const clefTitleEls = {}; // clef -> element showing the clef's translated title
+
 function buildStatsGrid() {
   statsGridEl.innerHTML = '';
   statsCells.clear();
 
-  [
-    { clef: 'treble', title: 'Clé de Sol' },
-    { clef: 'bass', title: 'Clé de Fa' },
-  ].forEach(({ clef, title }) => {
+  ['treble', 'bass'].forEach((clef) => {
     const wrap = document.createElement('div');
     const heading = document.createElement('div');
     heading.className = 'clef-row-title';
     const titleEl = document.createElement('span');
-    titleEl.textContent = title;
+    titleEl.textContent = clef === 'treble' ? t('clefTreble') : t('clefBass');
+    clefTitleEls[clef] = titleEl;
     const unlockEl = document.createElement('span');
     unlockEl.className = 'next-unlock';
     heading.append(titleEl, unlockEl);
@@ -1161,17 +1456,18 @@ function renderStats() {
     const { cell, labelEl, pctEl, fillEl } = statsCells.get(n.id);
     cell.className = 'note-cell ' + noteStatusClass(entry);
     if (reviewIds && reviewIds.has(n.id)) cell.classList.add('in-review');
+    const displayLabel = noteDisplayLabel(n);
     if (!entry.unlocked) {
-      labelEl.textContent = `🔒 ${n.displayLabel}`;
+      labelEl.textContent = t('lockedCell', displayLabel);
       return;
     }
     const learning = entry.attempts < LEARNING_ATTEMPTS;
-    labelEl.textContent = (learning ? '✨ ' : '') + n.displayLabel;
+    labelEl.textContent = learning ? t('learningBadge', displayLabel) : displayLabel;
     pctEl.textContent = (pickPcts.get(n.id) || 0).toFixed(1) + '%';
     const errorPct = entry.attempts ? Math.round(errorRateOf(entry) * 100) : 0;
     fillEl.style.width = (entry.attempts ? Math.round((1 - errorRateOf(entry)) * 100) : 0) + '%';
-    const avgPart = entry.avgMs ? ` · temps moyen ${(entry.avgMs / 1000).toFixed(1)}s` : '';
-    cell.title = `${n.displayLabel} — taux d'erreur ${errorPct}% · ${entry.attempts} essai${entry.attempts > 1 ? 's' : ''}${avgPart}`;
+    const avgPart = entry.avgMs ? t('avgTimeSuffix', (entry.avgMs / 1000).toFixed(1)) : '';
+    cell.title = t('cellTooltip', displayLabel, errorPct, entry.attempts, avgPart);
   });
 
   // Flash the cell of the note that was just answered, so the eye is drawn
@@ -1187,11 +1483,12 @@ function renderStats() {
 
   ['treble', 'bass'].forEach((clef) => {
     const info = unlockGate(clef);
+    clefTitleEls[clef].textContent = clef === 'treble' ? t('clefTreble') : t('clefBass');
     nextUnlockEls[clef].textContent = state.reviewMode
-      ? 'Déblocages en pause (révision)'
+      ? t('nextUnlockPaused')
       : info
-        ? `Prochaine : ${info.next.displayLabel} · ${Math.round(info.progress * 100)}%`
-        : 'Toutes débloquées 🎉';
+        ? t('nextUnlockInfo', noteDisplayLabel(info.next), Math.round(info.progress * 100))
+        : t('nextUnlockAllDone');
   });
 
   // The review pool shifts as notes get consolidated; keep the hint fresh.
@@ -1216,20 +1513,20 @@ function noteTableRow(n, pickPcts) {
   const errorRatePct = p.attempts ? Math.round(errorRateOf(p) * 100) : null;
   const learning = p.unlocked && p.attempts < LEARNING_ATTEMPTS;
   const status = !p.unlocked
-    ? '🔒 Verrouillée'
+    ? t('lockedCell', t('statusLocked'))
     : learning
-      ? '✨ Apprentissage'
+      ? t('statusLearning')
       : noteStatusClass(p) === 'weak'
-        ? 'Faible'
+        ? t('statusWeak')
         : noteStatusClass(p) === 'mid'
-          ? 'En progrès'
-          : 'Maîtrisée';
+          ? t('statusMid')
+          : t('statusStrong');
 
   return {
     note: n,
     unlocked: p.unlocked,
-    label: n.displayLabel,
-    clef: n.clef === 'treble' ? 'Sol' : 'Fa',
+    label: noteDisplayLabel(n),
+    clef: n.clef === 'treble' ? t('clefShortTreble') : t('clefShortBass'),
     status,
     pick: p.unlocked ? pickPct ?? 0 : null,
     errorRate: errorRatePct,
@@ -1328,25 +1625,25 @@ state.chartMetric = 'level';
 
 const CHART_METRICS = {
   level: {
-    title: 'Niveau global (0–100)',
+    titleKey: 'chartTitleLevel',
     color: '#4361ee',
     value: (d) => d.level,
     domain: [0, 100],
   },
   accuracy: {
-    title: 'Précision (%)',
+    titleKey: 'chartTitleAccuracy',
     color: '#2a9d8f',
     value: (d) => (d.attempts ? Math.round((d.correct / d.attempts) * 100) : null),
     domain: [0, 100],
   },
   speed: {
-    title: 'Temps de réponse moyen (s) — plus bas = mieux',
+    titleKey: 'chartTitleSpeed',
     color: '#f4a261',
     value: (d) => (d.timeCount ? +(d.timeSum / d.timeCount / 1000).toFixed(2) : null),
     domain: null,
   },
   volume: {
-    title: 'Notes travaillées par jour',
+    titleKey: 'chartTitleVolume',
     color: '#4361ee',
     value: (d) => d.attempts,
     domain: null,
@@ -1356,7 +1653,7 @@ const CHART_METRICS = {
 
 function chartDayLabel(key) {
   const [y, m, d] = key.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+  return new Date(y, m - 1, d).toLocaleDateString(lang() === 'en' ? 'en-US' : 'fr-FR', { day: 'numeric', month: 'short' });
 }
 
 // Days that actually had practice, oldest first, capped to the last 30.
@@ -1375,8 +1672,7 @@ function renderChart() {
     .filter((pt) => pt.v !== null && pt.v !== undefined);
 
   if (points.length === 0) {
-    progressChartEl.innerHTML =
-      '<div class="chart-empty">Joue quelques notes pour commencer à tracer ta courbe 📈</div>';
+    progressChartEl.innerHTML = `<div class="chart-empty">${t('chartEmpty')}</div>`;
     return;
   }
 
@@ -1426,22 +1722,22 @@ function renderChart() {
       : '');
 
   progressChartEl.innerHTML =
-    `<div class="chart-title">${metric.title}</div>` +
+    `<div class="chart-title">${t(metric.titleKey)}</div>` +
     `<svg viewBox="0 0 ${W} ${H}" role="img">${gridLines}${marks}${lastLabel}${xLabels}</svg>` +
-    (points.length === 1 ? '<div class="chart-empty">Reviens demain pour voir ta courbe évoluer 🌱</div>' : '');
+    (points.length === 1 ? `<div class="chart-empty">${t('chartEmptyOneDay')}</div>` : '');
 }
 
 function renderTodayChips() {
-  const t = state.history[todayKey()] || { attempts: 0, correct: 0, timeSum: 0, timeCount: 0 };
-  const acc = t.attempts ? Math.round((t.correct / t.attempts) * 100) + '%' : '–';
-  const spd = t.timeCount ? (t.timeSum / t.timeCount / 1000).toFixed(1) + 's' : '–';
+  const today = state.history[todayKey()] || { attempts: 0, correct: 0, timeSum: 0, timeCount: 0 };
+  const acc = today.attempts ? Math.round((today.correct / today.attempts) * 100) + '%' : '–';
+  const spd = today.timeCount ? (today.timeSum / today.timeCount / 1000).toFixed(1) + 's' : '–';
   const days = practiceStreakDays();
   todayChipsEl.innerHTML = [
-    `<span class="chip">🎵 <b>${t.attempts}</b> note${t.attempts > 1 ? 's' : ''} aujourd'hui</span>`,
-    `<span class="chip">🎯 <b>${acc}</b> précision</span>`,
-    `<span class="chip">⚡ <b>${spd}</b> par note</span>`,
-    `<span class="chip">📈 Niveau <b>${globalLevel()}</b></span>`,
-    `<span class="chip${days > 0 ? ' chip-fire' : ''}">🔥 <b>${days}</b> jour${days > 1 ? 's' : ''} d'affilée</span>`,
+    `<span class="chip">${t('chipNotesToday', today.attempts)}</span>`,
+    `<span class="chip">${t('chipAccuracy', acc)}</span>`,
+    `<span class="chip">${t('chipPerNote', spd)}</span>`,
+    `<span class="chip">${t('chipLevel', globalLevel())}</span>`,
+    `<span class="chip${days > 0 ? ' chip-fire' : ''}">${t('chipStreakDays', days)}</span>`,
   ].join('');
 }
 
@@ -1466,8 +1762,8 @@ function renderHeatmap() {
       const entry = state.history[todayKey(cellDate)];
       const n = entry ? entry.attempts : 0;
       const bucket = n === 0 ? 0 : n < 25 ? 1 : n < 75 ? 2 : n < 150 ? 3 : 4;
-      const dateLabel = cellDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-      col += `<i class="hm-cell hm-${bucket}" title="${dateLabel} — ${n} note${n > 1 ? 's' : ''}"></i>`;
+      const dateLabel = cellDate.toLocaleDateString(lang() === 'en' ? 'en-US' : 'fr-FR', { day: 'numeric', month: 'short' });
+      col += `<i class="hm-cell hm-${bucket}" title="${t('heatmapTooltip', dateLabel, n)}"></i>`;
     }
     html += `<span class="hm-col">${col}</span>`;
   }
@@ -1486,15 +1782,15 @@ function renderInsights() {
   let html = '';
   if (weak.length) {
     html +=
-      '<div class="insight-block"><div class="insight-title">🎯 À travailler</div>' +
+      `<div class="insight-block"><div class="insight-title">${t('insightToWork')}</div>` +
       weak
-        .map((n) => `<span class="insight-chip">${n.displayLabel} · ${Math.round(errorRateOf(state.progress[n.id]) * 100)}% d'erreur</span>`)
+        .map((n) => `<span class="insight-chip">${noteDisplayLabel(n)} · ${t('insightErrorRate', Math.round(errorRateOf(state.progress[n.id]) * 100))}</span>`)
         .join('') +
       '</div>';
   }
   if (confusions.length) {
     html +=
-      '<div class="insight-block"><div class="insight-title">🔀 Confusions fréquentes</div>' +
+      `<div class="insight-block"><div class="insight-title">${t('insightConfusions')}</div>` +
       confusions
         .map(([pair, count]) => `<span class="insight-chip">${pair} <b>(${count}×)</b></span>`)
         .join('') +
@@ -1577,10 +1873,7 @@ function applyPracticeModeUI() {
   });
   if (state.reviewMode) {
     const pool = practicePool();
-    reviewHintEl.textContent =
-      `🎯 Révision : uniquement tes ${pool.length} notes les plus fragiles (${pool
-        .map((n) => n.displayLabel)
-        .join(', ')}) — pas de nouveaux déblocages.`;
+    reviewHintEl.textContent = t('reviewHint', pool.length, pool.map((n) => noteDisplayLabel(n)).join(', '));
     reviewHintEl.classList.remove('hidden');
   } else {
     reviewHintEl.classList.add('hidden');
@@ -1638,7 +1931,7 @@ function renderSessionTimer() {
     sessionTimerEl.classList.add('hidden');
     return;
   }
-  sessionTimerEl.textContent = `⏱️ ${formatCountdown(state.sessionRemainingMs)} restantes`;
+  sessionTimerEl.textContent = t('sessionTimerRemaining', formatCountdown(state.sessionRemainingMs));
   sessionTimerEl.classList.remove('hidden');
 }
 
@@ -1694,12 +1987,12 @@ function renderSessionSummary() {
   const unlockedGain = unlockedNotes().length - s.unlockedStart;
   const levelGain = globalLevel() - s.levelStart;
   sessionSummaryEl.innerHTML =
-    '<div class="session-summary-title">⏱️ Temps écoulé — bilan de la session</div>' +
+    `<div class="session-summary-title">${t('sessionSummaryTitle')}</div>` +
     '<div class="today-chips">' +
-    `<span class="chip">🎵 <b>${attempts}</b> note${attempts > 1 ? 's' : ''}</span>` +
-    `<span class="chip">🎯 <b>${acc}%</b> précision</span>` +
-    `<span class="chip">🔓 <b>${unlockedGain >= 0 ? '+' : ''}${unlockedGain}</b> débloquée${Math.abs(unlockedGain) > 1 ? 's' : ''}</span>` +
-    `<span class="chip">📈 Niveau <b>${levelGain >= 0 ? '+' : ''}${levelGain}</b></span>` +
+    `<span class="chip">${t('sessionSummaryNotes', attempts)}</span>` +
+    `<span class="chip">${t('sessionSummaryAccuracy', acc)}</span>` +
+    `<span class="chip">${t('sessionSummaryUnlocked', unlockedGain)}</span>` +
+    `<span class="chip">${t('sessionSummaryLevel', levelGain)}</span>` +
     '</div>';
   sessionSummaryEl.classList.remove('hidden');
 }
@@ -1722,7 +2015,7 @@ function endSessionByTimeout() {
   skipBtn.classList.add('hidden');
   micBtn.classList.add('hidden');
   startBtn.classList.remove('hidden');
-  startBtn.textContent = '▶️ Commencer';
+  startBtn.textContent = t('btnStart');
   applyTimerSwitcherUI();
 }
 
@@ -1762,25 +2055,23 @@ stopBtn.addEventListener('click', () => {
   state.autoMode = false;
   stopListeningNow();
   pauseSessionTimer();
-  setFeedback('En pause. Clique sur Reprendre pour continuer.', '');
+  setFeedback(t('pausedMessage'), '');
   stopBtn.classList.add('hidden');
   skipBtn.classList.add('hidden');
   micBtn.classList.add('hidden');
   startBtn.classList.remove('hidden');
-  startBtn.textContent = '▶️ Reprendre';
+  startBtn.textContent = t('btnResume');
 });
 
 resetBtn.addEventListener('click', () => {
-  const ok = confirm('Réinitialiser toute ta progression ? Cette action est irréversible.');
+  const ok = confirm(t('confirmReset'));
   if (!ok) return;
   localStorage.removeItem(STORAGE_KEY);
   window.location.reload();
 });
 
 resetBassBtn.addEventListener('click', () => {
-  const ok = confirm(
-    "Réinitialiser ta progression en clé de Fa ? Tu repartiras de Fa₃ (la note au centre de la clé), puis les notes les plus proches se débloqueront en premier. La clé de Sol n'est pas touchée. Cette action est irréversible."
-  );
+  const ok = confirm(t('confirmResetBass'));
   if (!ok) return;
 
   NOTES.filter((n) => n.clef === 'bass').forEach((n) => {
@@ -1799,7 +2090,7 @@ resetBassBtn.addEventListener('click', () => {
   renderStats();
   renderProgress();
   updateTopbar();
-  setFeedback(`✅ Clé de Fa réinitialisée. Tu repars de ${first.displayLabel}.`, 'success');
+  setFeedback(t('resetBassDone', noteDisplayLabel(first)), 'success');
   if (state.autoMode) beginRound();
 });
 
@@ -1835,20 +2126,18 @@ importFileInput.addEventListener('change', () => {
     try {
       data = JSON.parse(reader.result);
     } catch (e) {
-      alert("Ce fichier n'est pas une sauvegarde valide (JSON illisible).");
+      alert(t('invalidFile'));
       importFileInput.value = '';
       return;
     }
 
     if (!data || typeof data.progress !== 'object') {
-      alert("Ce fichier ne contient pas de progression reconnaissable.");
+      alert(t('invalidProgress'));
       importFileInput.value = '';
       return;
     }
 
-    const ok = confirm(
-      'Importer cette sauvegarde va remplacer ta progression actuelle sur cet appareil. Continuer ?'
-    );
+    const ok = confirm(t('confirmImport'));
     if (!ok) {
       importFileInput.value = '';
       return;
@@ -1870,14 +2159,107 @@ importFileInput.addEventListener('change', () => {
     renderProgress();
     updateTopbar();
     updateClefSwitcherUI();
-    setFeedback('✅ Progression importée avec succès.', 'success');
+    setFeedback(t('importSuccess'), 'success');
     importFileInput.value = '';
   };
   reader.readAsText(file);
 });
 
+// ---------- Language switcher ----------
+
+const langSwitcherEl = document.getElementById('langSwitcher');
+const appTitleEl = document.getElementById('appTitle');
+const staticLabelEls = {
+  lblStreak: 'streak', lblRecord: 'record', lblScore: 'score', lblSpeed: 'speed', lblUnlocked: 'unlockedNotes',
+  progressTitle: 'progressTitle', regularityTitle: 'regularityTitle', statsTitle: 'statsTitle',
+  tableTitle: 'tableTitle',
+  lblLegendLocked: 'legendLocked', lblLegendWeak: 'legendWeak', lblLegendMid: 'legendMid', lblLegendStrong: 'legendStrong',
+};
+const staticButtonEls = {
+  exportBtn: 'btnExport', importBtn: 'btnImport', resetBassBtn: 'btnResetBass', resetBtn: 'btnReset',
+};
+const CLEF_BTN_KEYS = { treble: 'clefTreble', bass: 'clefBass', both: 'clefBoth' };
+const INPUT_BTN_KEYS = { mic: 'inputMic', midi: 'inputMidi', keyboard: 'inputKeyboard' };
+const PRACTICE_BTN_KEYS = { normal: 'practiceNormal', review: 'practiceReview' };
+const METRIC_BTN_KEYS = { level: 'chartLevel', accuracy: 'chartAccuracy', speed: 'chartSpeed', volume: 'chartVolume' };
+const TABLE_TH_KEYS = { label: 'thNote', clef: 'thClef', status: 'thStatus', pick: 'thPick', errorRate: 'thError', avgMs: 'thAvg', attempts: 'thAttempts' };
+
+// Applies every static (non-dynamically-rendered) piece of UI text for the
+// current language. Dynamic content (feedback, chips, table rows, chart...)
+// is already translated live by whatever render function produces it; this
+// only covers HTML that's written once and otherwise never revisited.
+function applyStaticI18n() {
+  document.documentElement.lang = lang();
+  document.title = t('pageTitle');
+  langSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.lang === lang());
+  });
+  appTitleEl.textContent = t('appTitle');
+  Object.entries(staticLabelEls).forEach(([id, key]) => {
+    document.getElementById(id).textContent = t(key);
+  });
+  Object.entries(staticButtonEls).forEach(([id, key]) => {
+    document.getElementById(id).textContent = t(key);
+  });
+
+  clefSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    btn.textContent = t(CLEF_BTN_KEYS[btn.dataset.mode]);
+  });
+  tableClefFilterEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    btn.textContent = t(CLEF_BTN_KEYS[btn.dataset.clef]);
+  });
+  inputModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    btn.textContent = t(INPUT_BTN_KEYS[btn.dataset.input]);
+  });
+  practiceModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    btn.textContent = t(PRACTICE_BTN_KEYS[btn.dataset.practice]);
+  });
+  timerSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    const minutes = Number(btn.dataset.minutes);
+    btn.textContent = minutes === 0 ? t('timerFree') : t('timerMinutes', minutes);
+  });
+  chartSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+    btn.textContent = t(METRIC_BTN_KEYS[btn.dataset.metric]);
+  });
+  notesTableEl.querySelectorAll('th[data-sort]').forEach((th) => {
+    th.textContent = t(TABLE_TH_KEYS[th.dataset.sort]);
+  });
+
+  unsupportedMsg.textContent = t('micUnsupported');
+  midiUnsupportedMsg.textContent = t('midiUnsupported');
+  micBtn.textContent = t('btnRetryMic');
+  skipBtn.textContent = t('btnSkip');
+  stopBtn.textContent = t('btnPause');
+  // startBtn toggles between "start fresh" and "resume from pause"; detect
+  // which state it's currently showing (in either language) rather than
+  // assuming, since a lang switch shouldn't reset a paused session's label.
+  const wasResume = startBtn.textContent === STRINGS.fr.btnResume || startBtn.textContent === STRINGS.en.btnResume;
+  startBtn.textContent = wasResume ? t('btnResume') : t('btnStart');
+
+  applyInputModeUI();
+  updateMidiDeviceStatusUI();
+}
+
+langSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const newLang = btn.dataset.lang;
+    if (newLang === state.settings.lang) return;
+    state.settings.lang = newLang;
+    saveState();
+    langSwitcherEl.querySelectorAll('.clef-btn').forEach((b) => b.classList.toggle('active', b === btn));
+    applyStaticI18n();
+    // Full re-render: note labels, table headers/rows, chart, chips and
+    // insights all embed language-dependent text or note names.
+    renderStats();
+    renderProgress();
+    updateTopbar();
+    if (state.autoMode) renderBatch(state.noteBatch, state.batchIndex, state.batchDone, state.currentWrong);
+  });
+});
+
 // ---------- Init ----------
 
+applyStaticI18n();
 renderStats();
 renderProgress();
 updateTopbar();

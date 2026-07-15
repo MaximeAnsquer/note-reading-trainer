@@ -142,6 +142,18 @@ body {
   color: var(--ink);
 }
 
+.lang-switcher {
+  margin-bottom: 0;
+  flex: 0 0 auto;
+}
+
+.lang-switcher .clef-btn {
+  flex: none;
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .clef-btn.active {
   background: var(--primary);
   color: white;
