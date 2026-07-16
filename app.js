@@ -683,13 +683,11 @@ function errorRateOf(p) {
   return p.attempts ? (p.misses || 0) / p.attempts : 0;
 }
 
-// In review mode the pool narrows to the notes that most need work: a high
-// error rate, or a rolling average well behind the pool's fastest note
-// (whichever signal is worse). When fewer than REVIEW_MIN_POOL notes clear
-// the bar, the neediest ones top the pool up so the drill keeps some variety
-// (and the mode stays useful even when everything is solid).
-const REVIEW_NEED_THRESHOLD = 0.15;
-const REVIEW_MIN_POOL = 3;
+// In review mode the pool is always exactly the REVIEW_POOL_SIZE shakiest
+// notes — ranked by whichever signal is worse, a high error rate or a
+// rolling average well behind the pool's fastest note — not a variable-size
+// set gated by a threshold.
+const REVIEW_POOL_SIZE = 5;
 
 function practicePool() {
   const base = unlockedNotesForPractice();
@@ -700,9 +698,7 @@ function practicePool() {
     if (!p.attempts) return 1; // no data yet: treat as needing review
     return Math.max(errorRateOf(p), speedGapBoost(p, poolMin) / SPEED_GAP_FACTOR);
   };
-  const sorted = [...base].sort((a, b) => needScore(b) - needScore(a));
-  const weak = sorted.filter((n) => needScore(n) > REVIEW_NEED_THRESHOLD);
-  return weak.length >= REVIEW_MIN_POOL ? weak : sorted.slice(0, Math.min(REVIEW_MIN_POOL, sorted.length));
+  return [...base].sort((a, b) => needScore(b) - needScore(a)).slice(0, Math.min(REVIEW_POOL_SIZE, base.length));
 }
 
 // Fastest recorded rolling average in a pool, or null if nobody in it has
