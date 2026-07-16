@@ -504,6 +504,9 @@ state.missPenaltyMs = 0;
 // Session-only: not persisted, so a forgotten review session can't silently
 // block curriculum progress across visits.
 state.reviewMode = false;
+// The frozen set of note ids selected when review mode was last switched on
+// (see computeReviewPool). Null outside review mode.
+state.reviewPoolIds = null;
 state.sessionEndAt = null;
 state.sessionTicker = null;
 state.sessionStats = null;
@@ -683,15 +686,17 @@ function errorRateOf(p) {
   return p.attempts ? (p.misses || 0) / p.attempts : 0;
 }
 
-// In review mode the pool is always exactly the REVIEW_POOL_SIZE shakiest
-// notes — ranked by whichever signal is worse, a high error rate or a
-// rolling average well behind the pool's fastest note — not a variable-size
-// set gated by a threshold.
+// Review mode targets exactly the REVIEW_POOL_SIZE shakiest notes — ranked
+// by whichever signal is worse, a high error rate or a rolling average well
+// behind the pool's fastest note. That selection is made ONCE, when review
+// mode is switched on (see the practiceModeSwitcher handler), and stays
+// fixed for the rest of the session: recomputing it after every answer would
+// let a note that's just been drilled back to health swap itself out
+// mid-session, which defeats the point of a focused review set.
 const REVIEW_POOL_SIZE = 5;
 
-function practicePool() {
+function computeReviewPool() {
   const base = unlockedNotesForPractice();
-  if (!state.reviewMode) return base;
   const poolMin = poolMinAvgMs(base);
   const needScore = (n) => {
     const p = state.progress[n.id];
@@ -699,6 +704,13 @@ function practicePool() {
     return Math.max(errorRateOf(p), speedGapBoost(p, poolMin) / SPEED_GAP_FACTOR);
   };
   return [...base].sort((a, b) => needScore(b) - needScore(a)).slice(0, Math.min(REVIEW_POOL_SIZE, base.length));
+}
+
+function practicePool() {
+  const base = unlockedNotesForPractice();
+  if (!state.reviewMode) return base;
+  const frozen = (state.reviewPoolIds || []).map((id) => NOTES_BY_ID[id]).filter(Boolean);
+  return frozen.length ? frozen : base;
 }
 
 // Fastest recorded rolling average in a pool, or null if nobody in it has
@@ -866,9 +878,12 @@ function updateAfterAnswer(note, correct, elapsedMs) {
   state.lastAnswered = { id: note.id, correct };
 
   // Speed tracking, from correct answers only (a wrong answer's timing says
-  // nothing about reading fluency). The cap keeps a coffee break from
-  // wrecking the averages.
-  const sample = correct ? Math.min(elapsedMs || 0, BASELINE_SAMPLE_CAP_MS) : 0;
+  // nothing about reading fluency), and never during review: cycling through
+  // a tiny fixed set of already-flagged notes produces timings that don't
+  // reflect genuine sight-reading pace, so they're excluded from the per-note
+  // average, the speed baseline, and the daily time log — not just avgMs.
+  // The cap keeps a coffee break from wrecking the averages outside review.
+  const sample = correct && !state.reviewMode ? Math.min(elapsedMs || 0, BASELINE_SAMPLE_CAP_MS) : 0;
   if (sample > 0) {
     if (!state.stats.speedBaseline) state.stats.speedBaseline = {};
     const mode = state.settings.inputMode;
@@ -1881,6 +1896,8 @@ practiceModeSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
     const wantsReview = btn.dataset.practice === 'review';
     if (wantsReview === state.reviewMode) return;
     state.reviewMode = wantsReview;
+    // Freeze the review set right when entering, so it can't drift mid-session.
+    state.reviewPoolIds = wantsReview ? computeReviewPool().map((n) => n.id) : null;
     applyPracticeModeUI();
     // Pool changed: displayed probabilities and review highlights are stale,
     // and any queued batch may contain notes now outside the pool.
