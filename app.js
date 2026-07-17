@@ -759,6 +759,14 @@ const TIME_WEIGHT_FLOOR = 0.1;
 const TIME_WEIGHT_NO_DATA = TIME_WEIGHT_FLOOR + SPEED_GAP_MAX + 1;
 
 function noteWeight(note, poolMin) {
+  // Review mode deliberately stops collecting fresh timing data for the
+  // duration of the session (see updateAfterAnswer), so weighting draws by
+  // time here would let whichever note happened to have the worst — or
+  // simply missing — avgMs *at the moment review started* dominate every
+  // single batch for the whole session, with no way to correct itself. Draw
+  // uniformly across the fixed review set instead, so all 5 notes actually
+  // get drilled evenly.
+  if (state.reviewMode) return 1;
   const p = state.progress[note.id];
   if (p.avgMs == null) return TIME_WEIGHT_NO_DATA;
   return TIME_WEIGHT_FLOOR + speedGapBoost(p, poolMin);
