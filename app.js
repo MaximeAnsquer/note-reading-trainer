@@ -117,8 +117,6 @@ const STRINGS = {
     sessionSummaryLevel: (n) => `📈 Niveau <b>${n >= 0 ? '+' : ''}${n}</b>`,
     sessionImprovedTitle: '📊 Plus rapide que ta moyenne habituelle',
     sessionImprovedChip: (label, before, after) => `${label} : <b>${before}s → ${after}s</b>`,
-    feedbackCorrect: (label, time, speedEmoji, milestone) => `✅ ${label} (${time}${speedEmoji})${milestone}`,
-    milestoneStreak: (n) => ` · 🔥 ${n} d'affilée !`,
     feedbackIncorrect: (source, heard, understood) => `❌ ${source} : "${heard}"${understood}`,
     understood: (label) => ` (compris : ${label})`,
     sourceMic: 'Micro a entendu',
@@ -237,8 +235,6 @@ const STRINGS = {
     sessionSummaryLevel: (n) => `📈 Level <b>${n >= 0 ? '+' : ''}${n}</b>`,
     sessionImprovedTitle: '📊 Faster than your usual average',
     sessionImprovedChip: (label, before, after) => `${label}: <b>${before}s → ${after}s</b>`,
-    feedbackCorrect: (label, time, speedEmoji, milestone) => `✅ ${label} (${time}${speedEmoji})${milestone}`,
-    milestoneStreak: (n) => ` · 🔥 ${n} in a row!`,
     feedbackIncorrect: (source, heard, understood) => `❌ ${source}: "${heard}"${understood}`,
     understood: (label) => ` (heard as: ${label})`,
     sourceMic: 'Mic heard',
@@ -341,21 +337,10 @@ const MISS_TIME_PENALTY_MS = 5000;
 const BASELINE_ALPHA = 0.12;
 const DEFAULT_BASELINE_MS = 2500;
 const BASELINE_SAMPLE_CAP_MS = 15000;
-const FAST_MIN_MS = 900;
-const FAST_MAX_MS = 3000;
-const SLOW_FACTOR = 3;
 
 function speedBaselineMs() {
   const baselines = state.stats.speedBaseline || {};
   return baselines[state.settings.inputMode] || DEFAULT_BASELINE_MS;
-}
-
-function fastAnswerMs() {
-  return Math.min(FAST_MAX_MS, Math.max(FAST_MIN_MS, 0.8 * speedBaselineMs()));
-}
-
-function slowAnswerMs() {
-  return fastAnswerMs() * SLOW_FACTOR;
 }
 
 function buildNotes() {
@@ -878,13 +863,7 @@ function todayKey(d = new Date()) {
 // The level is purely speed-based: a miss already adds a flat time penalty
 // to the note's measured average (MISS_TIME_PENALTY_MS, folded in before
 // avgMs is updated), so errors are already reflected in the time itself —
-// scoring accuracy on top would double-count them. Each note's score is
-// proportional to speed (reference time / avgMs, capped at 1 so an
-// extra-fast note can't earn more than full credit) rather than a
-// threshold-based cliff — a note twice as slow as the reference scores half,
-// smoothly, with no "still counts as fine" plateau or "already bottomed out"
-// floor. The reference is the player's own "fast" bar (fastAnswerMs), so the
-// level stays meaningful across input modes and paces.
+// scoring accuracy on top would double-count them.
 // Total proportionality, no reference/threshold and no ceiling: each note's
 // contribution is simply inverse time (ms→"per second" via the /1000, purely
 // a unit conversion for a readable number, not a target time to beat).
@@ -1417,15 +1396,13 @@ function setFeedback(text, kind) {
 function onCorrect() {
   const note = state.currentNote;
   const elapsedMs = Date.now() - (state.noteShownAt || Date.now()) + (state.missPenaltyMs || 0);
-  const elapsedLabel = (elapsedMs / 1000).toFixed(1) + 's';
-  const speed = elapsedMs <= fastAnswerMs() ? ' ⚡' : elapsedMs >= slowAnswerMs() ? ' 🐢' : '';
   // A new-note unlock can happen here, but deliberately gets no feedback of
   // its own and no extra delay: it's surfaced in the stats grid (🔒 turning
   // into a live cell) rather than interrupting the answer flow or timing.
   updateAfterAnswer(note, true, elapsedMs);
-  const streak = state.stats.streak;
-  const milestone = streak > 0 && streak % 10 === 0 ? t('milestoneStreak', streak) : '';
-  setFeedback(t('feedbackCorrect', noteLabel(note), elapsedLabel, speed, milestone), 'success');
+  // No feedback text on a correct answer — a wrong-answer message from the
+  // previous note (if any) is still cleared so it doesn't linger.
+  setFeedback('', '');
   if (!state.autoMode) updateTopbar();
   advanceAfterCorrect();
   if (state.autoMode) beginRound();
