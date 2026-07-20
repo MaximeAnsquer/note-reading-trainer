@@ -867,30 +867,22 @@ function todayKey(d = new Date()) {
 // across the full range of notes, so it grows both by unlocking new notes
 // and by cutting mistakes on the ones already unlocked. An unlocked note
 // with no attempts yet contributes 0, same as a locked one.
-// A note's contribution to the level requires both accuracy and speed —
-// same philosophy as the old per-answer correctness score: reading a note
-// correctly but slowly isn't full credit. Speed is scored against the
-// player's own fast/slow thresholds (the same ones behind the ⚡/🐢
-// indicators on each answer), degrading linearly from 1 (at or under
-// "fast") to 0 (at or beyond "slow"). A note with no recorded average yet
-// (possible if every correct answer on it happened during review, when
-// timing isn't tracked) is scored as neutral rather than penalized for
-// data that was never collected.
-function speedScoreOf(p) {
-  if (p.avgMs == null) return 1;
-  const fast = fastAnswerMs();
-  const slow = slowAnswerMs();
-  if (p.avgMs <= fast) return 1;
-  if (p.avgMs >= slow) return 0;
-  return 1 - (p.avgMs - fast) / (slow - fast);
-}
-
+// The level is purely speed-based: a miss already adds a flat time penalty
+// to the note's measured average (MISS_TIME_PENALTY_MS, folded in before
+// avgMs is updated), so errors are already reflected in the time itself —
+// scoring accuracy on top would double-count them. Each note's score is
+// proportional to speed (reference time / avgMs, capped at 1 so an
+// extra-fast note can't earn more than full credit) rather than a
+// threshold-based cliff — a note twice as slow as the reference scores half,
+// smoothly, with no "still counts as fine" plateau or "already bottomed out"
+// floor. The reference is the player's own "fast" bar (fastAnswerMs), so the
+// level stays meaningful across input modes and paces.
 function globalLevel() {
+  const fast = fastAnswerMs();
   const sum = NOTES.reduce((s, n) => {
     const p = state.progress[n.id];
-    if (!p.unlocked || !p.attempts) return s;
-    const accuracy = 1 - errorRateOf(p);
-    return s + accuracy * speedScoreOf(p);
+    if (!p.unlocked || !p.attempts || p.avgMs == null) return s;
+    return s + Math.min(1, fast / p.avgMs);
   }, 0);
   return Math.round((sum / NOTES.length) * 100);
 }
