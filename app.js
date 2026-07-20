@@ -62,7 +62,7 @@ const STRINGS = {
     chartAccuracy: 'Précision',
     chartSpeed: 'Vitesse',
     chartVolume: 'Volume',
-    chartTitleLevel: 'Niveau global (0–100)',
+    chartTitleLevel: 'Niveau global — proportionnel à la vitesse',
     chartTitleAccuracy: 'Précision (%)',
     chartTitleSpeed: 'Temps de réponse moyen (s) — plus bas = mieux',
     chartTitleVolume: 'Notes travaillées par jour',
@@ -115,6 +115,8 @@ const STRINGS = {
     sessionSummaryAccuracy: (pct) => `🎯 <b>${pct}%</b> précision`,
     sessionSummaryUnlocked: (n) => `🔓 <b>${n >= 0 ? '+' : ''}${n}</b> débloquée${Math.abs(n) > 1 ? 's' : ''}`,
     sessionSummaryLevel: (n) => `📈 Niveau <b>${n >= 0 ? '+' : ''}${n}</b>`,
+    sessionImprovedTitle: '⚡ Nouveaux records personnels',
+    sessionImprovedChip: (label, before, after) => `${label} : <b>${before}s → ${after}s</b>`,
     feedbackCorrect: (label, time, speedEmoji, milestone) => `✅ ${label} (${time}${speedEmoji})${milestone}`,
     milestoneStreak: (n) => ` · 🔥 ${n} d'affilée !`,
     feedbackIncorrect: (source, heard, understood) => `❌ ${source} : "${heard}"${understood}`,
@@ -180,7 +182,7 @@ const STRINGS = {
     chartAccuracy: 'Accuracy',
     chartSpeed: 'Speed',
     chartVolume: 'Volume',
-    chartTitleLevel: 'Overall level (0–100)',
+    chartTitleLevel: 'Overall level — proportional to speed',
     chartTitleAccuracy: 'Accuracy (%)',
     chartTitleSpeed: 'Average response time (s) — lower is better',
     chartTitleVolume: 'Notes practiced per day',
@@ -233,6 +235,8 @@ const STRINGS = {
     sessionSummaryAccuracy: (pct) => `🎯 <b>${pct}%</b> accuracy`,
     sessionSummaryUnlocked: (n) => `🔓 <b>${n >= 0 ? '+' : ''}${n}</b> unlocked`,
     sessionSummaryLevel: (n) => `📈 Level <b>${n >= 0 ? '+' : ''}${n}</b>`,
+    sessionImprovedTitle: '⚡ New personal bests',
+    sessionImprovedChip: (label, before, after) => `${label}: <b>${before}s → ${after}s</b>`,
     feedbackCorrect: (label, time, speedEmoji, milestone) => `✅ ${label} (${time}${speedEmoji})${milestone}`,
     milestoneStreak: (n) => ` · 🔥 ${n} in a row!`,
     feedbackIncorrect: (source, heard, understood) => `❌ ${source}: "${heard}"${understood}`,
@@ -529,6 +533,10 @@ state.reviewPoolIds = null;
 state.sessionEndAt = null;
 state.sessionTicker = null;
 state.sessionStats = null;
+// note id -> {sum, count} of correct-answer times collected THIS session,
+// reset in startSession(). Compared against state.sessionStats.avgMsSnapshot
+// at session end to flag notes the player beat their own average on.
+state.sessionNoteTimes = {};
 
 // ---------- DOM ----------
 
@@ -877,12 +885,17 @@ function todayKey(d = new Date()) {
 // smoothly, with no "still counts as fine" plateau or "already bottomed out"
 // floor. The reference is the player's own "fast" bar (fastAnswerMs), so the
 // level stays meaningful across input modes and paces.
+// Total proportionality, no reference/threshold and no ceiling: each note's
+// contribution is simply inverse time (ms→"per second" via the /1000, purely
+// a unit conversion for a readable number, not a target time to beat).
+// Answering twice as fast always doubles the contribution, with nothing to
+// plateau against — the level keeps climbing past 100 as you get faster,
+// unbounded in both directions.
 function globalLevel() {
-  const fast = fastAnswerMs();
   const sum = NOTES.reduce((s, n) => {
     const p = state.progress[n.id];
     if (!p.unlocked || !p.attempts || p.avgMs == null) return s;
-    return s + Math.min(1, fast / p.avgMs);
+    return s + 1000 / p.avgMs;
   }, 0);
   return Math.round((sum / NOTES.length) * 100);
 }
@@ -928,6 +941,14 @@ function updateAfterAnswer(note, correct, elapsedMs) {
     const prev = state.stats.speedBaseline[mode];
     state.stats.speedBaseline[mode] = prev ? prev + BASELINE_ALPHA * (sample - prev) : sample;
     p.avgMs = p.avgMs ? p.avgMs + 0.3 * (sample - p.avgMs) : sample;
+    // Tracked separately from the live-updating p.avgMs above, against a
+    // snapshot taken when the session began (see startSession), so the
+    // end-of-session "you beat your average" check compares against where
+    // things stood before this session, not a baseline this session has
+    // already been blending itself into.
+    const st = state.sessionNoteTimes[note.id] || (state.sessionNoteTimes[note.id] = { sum: 0, count: 0 });
+    st.sum += sample;
+    st.count += 1;
   }
   if (correct) {
     state.stats.totalCorrect += 1;
@@ -1677,7 +1698,7 @@ const CHART_METRICS = {
     titleKey: 'chartTitleLevel',
     color: '#4361ee',
     value: (d) => d.level,
-    domain: [0, 100],
+    domain: null, // unbounded now that level has no ceiling
   },
   accuracy: {
     titleKey: 'chartTitleAccuracy',
@@ -2021,12 +2042,36 @@ function startSession() {
     correctStart: state.stats.totalCorrect,
     unlockedStart: unlockedNotes().length,
     levelStart: globalLevel(),
+    avgMsSnapshot: Object.fromEntries(
+      NOTES.filter((n) => state.progress[n.id].avgMs != null).map((n) => [n.id, state.progress[n.id].avgMs])
+    ),
   };
+  state.sessionNoteTimes = {};
   const minutes = state.settings.sessionMinutes;
   state.sessionRemainingMs = minutes > 0 ? minutes * 60 * 1000 : null;
   if (state.sessionRemainingMs != null) resumeSessionTimer();
   else renderSessionTimer();
   applyTimerSwitcherUI();
+}
+
+// Notes where this session's own average (tracked separately in
+// state.sessionNoteTimes, never touching the live p.avgMs) beat the
+// all-time average as it stood right when the session started — biggest
+// relative gain first. A note with no pre-session average (never timed
+// before) has nothing to beat, so it's left out rather than trivially
+// "improved from nothing".
+function computeSessionImprovements() {
+  if (!state.sessionStats) return [];
+  const snapshot = state.sessionStats.avgMsSnapshot || {};
+  return Object.entries(state.sessionNoteTimes)
+    .map(([id, { sum, count }]) => {
+      const before = snapshot[id];
+      if (before == null || count === 0) return null;
+      const after = sum / count;
+      return after < before ? { note: NOTES_BY_ID[id], before, after } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.before - b.after) / b.before - (a.before - a.after) / a.before);
 }
 
 function renderSessionSummary() {
@@ -2037,6 +2082,15 @@ function renderSessionSummary() {
   const acc = attempts ? Math.round((correct / attempts) * 100) : 0;
   const unlockedGain = unlockedNotes().length - s.unlockedStart;
   const levelGain = globalLevel() - s.levelStart;
+  const improvements = computeSessionImprovements();
+  const improvementsBlock = improvements.length
+    ? `<div class="session-summary-title">${t('sessionImprovedTitle')}</div>` +
+      '<div class="today-chips">' +
+      improvements
+        .map((imp) => `<span class="chip">${t('sessionImprovedChip', noteDisplayLabel(imp.note), (imp.before / 1000).toFixed(1), (imp.after / 1000).toFixed(1))}</span>`)
+        .join('') +
+      '</div>'
+    : '';
   sessionSummaryEl.innerHTML =
     `<div class="session-summary-title">${t('sessionSummaryTitle')}</div>` +
     '<div class="today-chips">' +
@@ -2044,7 +2098,8 @@ function renderSessionSummary() {
     `<span class="chip">${t('sessionSummaryAccuracy', acc)}</span>` +
     `<span class="chip">${t('sessionSummaryUnlocked', unlockedGain)}</span>` +
     `<span class="chip">${t('sessionSummaryLevel', levelGain)}</span>` +
-    '</div>';
+    '</div>' +
+    improvementsBlock;
   sessionSummaryEl.classList.remove('hidden');
 }
 
