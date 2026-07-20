@@ -115,7 +115,7 @@ const STRINGS = {
     sessionSummaryAccuracy: (pct) => `🎯 <b>${pct}%</b> précision`,
     sessionSummaryUnlocked: (n) => `🔓 <b>${n >= 0 ? '+' : ''}${n}</b> débloquée${Math.abs(n) > 1 ? 's' : ''}`,
     sessionSummaryLevel: (n) => `📈 Niveau <b>${n >= 0 ? '+' : ''}${n}</b>`,
-    sessionImprovedTitle: '⚡ Nouveaux records personnels',
+    sessionImprovedTitle: '📊 Plus rapide que ta moyenne habituelle',
     sessionImprovedChip: (label, before, after) => `${label} : <b>${before}s → ${after}s</b>`,
     feedbackCorrect: (label, time, speedEmoji, milestone) => `✅ ${label} (${time}${speedEmoji})${milestone}`,
     milestoneStreak: (n) => ` · 🔥 ${n} d'affilée !`,
@@ -235,7 +235,7 @@ const STRINGS = {
     sessionSummaryAccuracy: (pct) => `🎯 <b>${pct}%</b> accuracy`,
     sessionSummaryUnlocked: (n) => `🔓 <b>${n >= 0 ? '+' : ''}${n}</b> unlocked`,
     sessionSummaryLevel: (n) => `📈 Level <b>${n >= 0 ? '+' : ''}${n}</b>`,
-    sessionImprovedTitle: '⚡ New personal bests',
+    sessionImprovedTitle: '📊 Faster than your usual average',
     sessionImprovedChip: (label, before, after) => `${label}: <b>${before}s → ${after}s</b>`,
     feedbackCorrect: (label, time, speedEmoji, milestone) => `✅ ${label} (${time}${speedEmoji})${milestone}`,
     milestoneStreak: (n) => ` · 🔥 ${n} in a row!`,
@@ -978,8 +978,17 @@ function updateAfterAnswer(note, correct, elapsedMs) {
   day.unlocked = unlockedNotes().length;
 
   saveState();
-  renderStats();
-  renderProgress();
+  // While a session is actively running, only the staff itself (which note
+  // to read next) and its immediate ✅/❌ feedback should change on screen —
+  // the stats grid, sortable table, progress card and topbar counters would
+  // otherwise shift on every single answer, which is distracting mid-drill.
+  // They still catch up in one go as soon as the session pauses or ends
+  // (see the stopBtn handler and endSessionByTimeout). Data itself (saved
+  // just above) is never delayed, only its on-screen display.
+  if (!state.autoMode) {
+    renderStats();
+    renderProgress();
+  }
   return unlocked;
 }
 
@@ -1417,7 +1426,7 @@ function onCorrect() {
   const streak = state.stats.streak;
   const milestone = streak > 0 && streak % 10 === 0 ? t('milestoneStreak', streak) : '';
   setFeedback(t('feedbackCorrect', noteLabel(note), elapsedLabel, speed, milestone), 'success');
-  updateTopbar();
+  if (!state.autoMode) updateTopbar();
   advanceAfterCorrect();
   if (state.autoMode) beginRound();
 }
@@ -1434,7 +1443,7 @@ function onIncorrect(rawHeard, interpretedLabel, givenLabel) {
   // understood syllable (mic). Silence/noise isn't a confusion and passes null.
   recordConfusion(note, givenLabel || interpretedLabel);
   updateAfterAnswer(note, false);
-  updateTopbar();
+  if (!state.autoMode) updateTopbar();
   state.missPenaltyMs = (state.missPenaltyMs || 0) + MISS_TIME_PENALTY_MS;
 
   // Stay on the same note instead of moving on: it turns red, and
@@ -2123,6 +2132,11 @@ function endSessionByTimeout() {
   startBtn.classList.remove('hidden');
   startBtn.textContent = t('btnStart');
   applyTimerSwitcherUI();
+  // Catch up everything that was deliberately left un-rendered during the
+  // session (see updateAfterAnswer) now that it's safe to be distracting.
+  renderStats();
+  renderProgress();
+  updateTopbar();
 }
 
 timerSwitcherEl.querySelectorAll('.clef-btn').forEach((btn) => {
@@ -2167,6 +2181,11 @@ stopBtn.addEventListener('click', () => {
   micBtn.classList.add('hidden');
   startBtn.classList.remove('hidden');
   startBtn.textContent = t('btnResume');
+  // Catch up everything that was deliberately left un-rendered during the
+  // session (see updateAfterAnswer) now that it's safe to be distracting.
+  renderStats();
+  renderProgress();
+  updateTopbar();
 });
 
 resetBtn.addEventListener('click', () => {
