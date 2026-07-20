@@ -427,6 +427,24 @@ NOTES.forEach((n) => {
 
 // ---------- Persistence ----------
 
+// Saves from before per-note error tracking existed have `ema` and `attempts`
+// but no `misses` field at all. errorRateOf() treats a missing `misses` as 0
+// (no evidence of wrong answers), which silently counts those notes as a
+// flawless 0% error rate forever — inflating globalLevel toward 100 for
+// anyone with old data, regardless of how they're actually doing. There's no
+// way to recover the real historical miss count from `ema` alone, so instead
+// of guessing, restart error/attempt counting from zero for those notes —
+// avgMs (always a plain elapsed-time average, unaffected by this) is kept.
+function migrateLegacyProgress(progress) {
+  Object.values(progress).forEach((p) => {
+    if (p.unlocked && p.attempts > 0 && p.misses === undefined) {
+      p.attempts = 0;
+      p.misses = 0;
+      delete p.ema;
+    }
+  });
+}
+
 function loadState() {
   let saved = null;
   try {
@@ -452,6 +470,7 @@ function loadState() {
     Object.keys(progress).forEach((id) => {
       if (saved.progress[id]) progress[id] = saved.progress[id];
     });
+    migrateLegacyProgress(progress);
   }
   if (saved && saved.stats) {
     Object.assign(stats, saved.stats);
@@ -2167,6 +2186,7 @@ importFileInput.addEventListener('change', () => {
     NOTES.forEach((n) => {
       if (data.progress[n.id]) state.progress[n.id] = data.progress[n.id];
     });
+    migrateLegacyProgress(state.progress);
     if (data.stats) Object.assign(state.stats, data.stats);
     if (data.settings) Object.assign(state.settings, data.settings);
     if (data.history) state.history = data.history;
