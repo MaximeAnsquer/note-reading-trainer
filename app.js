@@ -867,11 +867,30 @@ function todayKey(d = new Date()) {
 // across the full range of notes, so it grows both by unlocking new notes
 // and by cutting mistakes on the ones already unlocked. An unlocked note
 // with no attempts yet contributes 0, same as a locked one.
+// A note's contribution to the level requires both accuracy and speed —
+// same philosophy as the old per-answer correctness score: reading a note
+// correctly but slowly isn't full credit. Speed is scored against the
+// player's own fast/slow thresholds (the same ones behind the ⚡/🐢
+// indicators on each answer), degrading linearly from 1 (at or under
+// "fast") to 0 (at or beyond "slow"). A note with no recorded average yet
+// (possible if every correct answer on it happened during review, when
+// timing isn't tracked) is scored as neutral rather than penalized for
+// data that was never collected.
+function speedScoreOf(p) {
+  if (p.avgMs == null) return 1;
+  const fast = fastAnswerMs();
+  const slow = slowAnswerMs();
+  if (p.avgMs <= fast) return 1;
+  if (p.avgMs >= slow) return 0;
+  return 1 - (p.avgMs - fast) / (slow - fast);
+}
+
 function globalLevel() {
   const sum = NOTES.reduce((s, n) => {
     const p = state.progress[n.id];
     if (!p.unlocked || !p.attempts) return s;
-    return s + (1 - errorRateOf(p));
+    const accuracy = 1 - errorRateOf(p);
+    return s + accuracy * speedScoreOf(p);
   }, 0);
   return Math.round((sum / NOTES.length) * 100);
 }
