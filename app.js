@@ -1675,11 +1675,35 @@ function updateTopbar() {
 
 const todayChipsEl = document.getElementById('todayChips');
 const progressChartEl = document.getElementById('progressChart');
+const chartTooltipEl = document.getElementById('chartTooltip');
 const heatmapEl = document.getElementById('calendarHeatmap');
 const insightsEl = document.getElementById('insights');
 const chartSwitcherEl = document.getElementById('chartSwitcher');
 
 state.chartMetric = 'level';
+
+// Tooltip on hover for chart points/bars (elements with class "chart-point"
+// and data-value/data-label). Delegated on the chart container itself
+// (rather than attached per-point) so it survives renderChart() replacing
+// the SVG's innerHTML on every redraw.
+function showChartTooltip(target) {
+  chartTooltipEl.textContent = `${target.dataset.label} : ${target.dataset.value}`;
+  const pointRect = target.getBoundingClientRect();
+  const wrapRect = progressChartEl.parentElement.getBoundingClientRect();
+  chartTooltipEl.style.left = (pointRect.left + pointRect.width / 2 - wrapRect.left) + 'px';
+  chartTooltipEl.style.top = (pointRect.top + pointRect.height / 2 - wrapRect.top) + 'px';
+  chartTooltipEl.classList.remove('hidden');
+}
+
+progressChartEl.addEventListener('mousemove', (e) => {
+  const target = e.target.closest('.chart-point');
+  if (target) showChartTooltip(target);
+  else chartTooltipEl.classList.add('hidden');
+});
+
+progressChartEl.addEventListener('mouseleave', () => {
+  chartTooltipEl.classList.add('hidden');
+});
 
 const CHART_METRICS = {
   level: {
@@ -1805,7 +1829,8 @@ function renderChart() {
       .map((p, i) => {
         const xx = useSnapshots ? x(p) : x(i);
         const yy = y(p.v);
-        return `<rect x="${(xx - bw / 2).toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${(T + plotH - yy).toFixed(1)}" rx="3" fill="${metric.color}" opacity="0.6"/>`;
+        const label = useSnapshots ? chartDayLabel(p.date) : chartDayLabel(p.key);
+        return `<rect class="chart-point" x="${(xx - bw / 2).toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${(T + plotH - yy).toFixed(1)}" rx="3" fill="${metric.color}" opacity="0.6" data-value="${p.v}" data-label="${label}"/>`;
       })
       .join('');
   } else {
@@ -1821,8 +1846,12 @@ function renderChart() {
       points
         .map((p, i) => {
           const xx = useSnapshots ? x(p) : x(i);
+          const yy = y(p.v);
           const label = useSnapshots ? chartDayLabel(p.date) : chartDayLabel(p.key);
-          return `<circle cx="${xx.toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3.5" fill="${metric.color}"><title>${label} : ${p.v}</title></circle>`;
+          // A larger transparent circle sits on top of the small visible dot
+          // purely to give the mouse a bigger, easier-to-hit hover target.
+          return `<circle cx="${xx.toFixed(1)}" cy="${yy.toFixed(1)}" r="3.5" fill="${metric.color}"/>` +
+            `<circle class="chart-point" cx="${xx.toFixed(1)}" cy="${yy.toFixed(1)}" r="9" fill="transparent" style="pointer-events:all" data-value="${p.v}" data-label="${label}"/>`;
         })
         .join('');
   }

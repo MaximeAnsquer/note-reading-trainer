@@ -83,7 +83,10 @@
           </div>
         </div>
         <div id="todayChips" class="today-chips"></div>
-        <div id="progressChart" class="progress-chart"></div>
+        <div class="progress-chart-wrap">
+          <div id="progressChart" class="progress-chart"></div>
+          <div id="chartTooltip" class="chart-tooltip hidden"></div>
+        </div>
         <div class="heatmap-wrap">
           <div class="heatmap-title" id="regularityTitle">Régularité — 12 dernières semaines</div>
           <div id="calendarHeatmap" class="heatmap"></div>
@@ -139,6 +142,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
-  <script src="app.js?v=59"></script>
+  <script src="app.js?v=60"></script>
 </body>
 </html>
