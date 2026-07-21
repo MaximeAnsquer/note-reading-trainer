@@ -472,8 +472,9 @@ function loadState() {
   // ('Mi₄ → Sol' -> count) power the progress card.
   const history = (saved && saved.history) || {};
   const confusions = (saved && saved.confusions) || {};
+  const sessionSnapshots = (saved && saved.sessionSnapshots) || [];
 
-  return { progress, stats, settings, history, confusions };
+  return { progress, stats, settings, history, confusions, sessionSnapshots };
 }
 
 function saveState() {
@@ -485,6 +486,7 @@ function saveState() {
       settings: state.settings,
       history: state.history,
       confusions: state.confusions,
+      sessionSnapshots: state.sessionSnapshots,
     })
   );
 }
@@ -1684,24 +1686,28 @@ const CHART_METRICS = {
     titleKey: 'chartTitleLevel',
     color: '#4361ee',
     value: (d) => d.level,
+    snapshotValue: (s) => s.level,
     domain: null, // unbounded now that level has no ceiling
   },
   accuracy: {
     titleKey: 'chartTitleAccuracy',
     color: '#2a9d8f',
     value: (d) => (d.attempts ? Math.round((d.correct / d.attempts) * 100) : null),
+    snapshotValue: (s) => s.accuracy,
     domain: [0, 100],
   },
   speed: {
     titleKey: 'chartTitleSpeed',
     color: '#f4a261',
     value: (d) => (d.timeCount ? +(d.timeSum / d.timeCount / 1000).toFixed(2) : null),
+    snapshotValue: (s) => s.speed,
     domain: null,
   },
   volume: {
     titleKey: 'chartTitleVolume',
     color: '#4361ee',
     value: (d) => d.attempts,
+    snapshotValue: (s) => s.volume,
     domain: null,
     bars: true,
   },
@@ -1714,6 +1720,15 @@ function chartDayLabel(key) {
 
 // Days that actually had practice, oldest first, capped to the last 30.
 function chartDays() {
+  // If we have session snapshots, use them; otherwise fall back to daily history
+  if (state.sessionSnapshots && state.sessionSnapshots.length > 0) {
+    // Group snapshots by date and keep unique date keys
+    const dateKeys = new Set();
+    state.sessionSnapshots.forEach((snap) => {
+      if (snap.date) dateKeys.add(snap.date);
+    });
+    return Array.from(dateKeys).sort().slice(-30);
+  }
   return Object.keys(state.history)
     .filter((k) => state.history[k].attempts > 0)
     .sort()
@@ -1722,10 +1737,33 @@ function chartDays() {
 
 function renderChart() {
   const metric = CHART_METRICS[state.chartMetric];
-  const days = chartDays();
-  const points = days
-    .map((k) => ({ key: k, v: metric.value(state.history[k]) }))
-    .filter((pt) => pt.v !== null && pt.v !== undefined);
+
+  // Use session snapshots if available, otherwise fall back to daily history
+  let points = [];
+  let useSnapshots = false;
+
+  if (state.sessionSnapshots && state.sessionSnapshots.length > 0) {
+    useSnapshots = true;
+    // Get all snapshots from the last 30 days, with values for this metric
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    points = state.sessionSnapshots
+      .filter((snap) => snap.timestamp >= thirtyDaysAgo)
+      .map((snap) => ({
+        timestamp: snap.timestamp,
+        date: snap.date,
+        v: metric.snapshotValue ? metric.snapshotValue(snap) : snap.level,
+      }))
+      .filter((pt) => pt.v !== null && pt.v !== undefined)
+      .sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  // Fall back to daily history if no snapshots
+  if (points.length === 0) {
+    const days = chartDays();
+    points = days
+      .map((k) => ({ key: k, v: metric.value(state.history[k]) }))
+      .filter((pt) => pt.v !== null && pt.v !== undefined);
+  }
 
   if (points.length === 0) {
     progressChartEl.innerHTML = `<div class="chart-empty">${t('chartEmpty')}</div>`;
@@ -1737,7 +1775,18 @@ function renderChart() {
   const values = points.map((p) => p.v);
   let [lo, hi] = metric.domain || [0, Math.max(...values) * 1.15];
   if (hi <= lo) hi = lo + 1;
-  const x = (i) => (points.length === 1 ? L + plotW / 2 : L + (i / (points.length - 1)) * plotW);
+
+  // Calculate X position: use time-based for snapshots, index-based for history
+  let x;
+  if (useSnapshots && points.length > 1) {
+    const minTime = points[0].timestamp;
+    const maxTime = points[points.length - 1].timestamp;
+    const timeRange = Math.max(1, maxTime - minTime);
+    x = (p) => L + ((p.timestamp - minTime) / timeRange) * plotW;
+  } else {
+    x = (i) => (points.length === 1 ? L + plotW / 2 : L + (i / (points.length - 1)) * plotW);
+  }
+
   const y = (v) => T + plotH - ((v - lo) / (hi - lo)) * plotH;
 
   const gridLines = [lo, (lo + hi) / 2, hi]
@@ -1754,27 +1803,39 @@ function renderChart() {
     const bw = Math.min(28, (plotW / points.length) * 0.65);
     marks = points
       .map((p, i) => {
+        const xx = useSnapshots ? x(p) : x(i);
         const yy = y(p.v);
-        return `<rect x="${(x(i) - bw / 2).toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${(T + plotH - yy).toFixed(1)}" rx="3" fill="${metric.color}" opacity="0.6"/>`;
+        return `<rect x="${(xx - bw / 2).toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${(T + plotH - yy).toFixed(1)}" rx="3" fill="${metric.color}" opacity="0.6"/>`;
       })
       .join('');
   } else {
-    const coords = points.map((p, i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`);
-    const area = `M${L},${T + plotH} L${coords.join(' L')} L${x(points.length - 1).toFixed(1)},${T + plotH} Z`;
+    const coords = points.map((p, i) => {
+      const xx = useSnapshots ? x(p) : x(i);
+      return `${xx.toFixed(1)},${y(p.v).toFixed(1)}`;
+    });
+    const lastX = useSnapshots ? x(points[points.length - 1]) : x(points.length - 1);
+    const area = `M${L},${T + plotH} L${coords.join(' L')} L${lastX.toFixed(1)},${T + plotH} Z`;
     marks =
       `<path d="${area}" fill="${metric.color}" opacity="0.08"/>` +
       `<polyline points="${coords.join(' ')}" fill="none" stroke="${metric.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>` +
       points
-        .map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3.5" fill="${metric.color}"><title>${chartDayLabel(p.key)} : ${p.v}</title></circle>`)
+        .map((p, i) => {
+          const xx = useSnapshots ? x(p) : x(i);
+          const label = useSnapshots ? chartDayLabel(p.date) : chartDayLabel(p.key);
+          return `<circle cx="${xx.toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3.5" fill="${metric.color}"><title>${label} : ${p.v}</title></circle>`;
+        })
         .join('');
   }
 
   const last = points[points.length - 1];
-  const lastLabel = `<text x="${x(points.length - 1).toFixed(1)}" y="${(y(last.v) - 10).toFixed(1)}" text-anchor="middle" class="chart-last">${last.v}</text>`;
+  const lastX = useSnapshots ? x(last) : x(points.length - 1);
+  const lastLabel = `<text x="${lastX.toFixed(1)}" y="${(y(last.v) - 10).toFixed(1)}" text-anchor="middle" class="chart-last">${last.v}</text>`;
+  const firstLabel = useSnapshots ? chartDayLabel(points[0].date) : chartDayLabel(points[0].key);
+  const lastDateLabel = useSnapshots ? chartDayLabel(last.date) : chartDayLabel(last.key);
   const xLabels =
-    `<text x="${L}" y="${H - 6}" class="chart-tick">${chartDayLabel(points[0].key)}</text>` +
+    `<text x="${L}" y="${H - 6}" class="chart-tick">${firstLabel}</text>` +
     (points.length > 1
-      ? `<text x="${W - R}" y="${H - 6}" text-anchor="end" class="chart-tick">${chartDayLabel(last.key)}</text>`
+      ? `<text x="${W - R}" y="${H - 6}" text-anchor="end" class="chart-tick">${lastDateLabel}</text>`
       : '');
 
   progressChartEl.innerHTML =
@@ -2089,6 +2150,38 @@ function renderSessionSummary() {
   sessionSummaryEl.classList.remove('hidden');
 }
 
+// Record a snapshot of the current state for the progress chart. Allows
+// multiple data points per day (one per session).
+function recordSessionSnapshot() {
+  if (!state.sessionStats) return;
+  const attempts = state.stats.totalAttempts - state.sessionStats.attemptsStart;
+  const correct = state.stats.totalCorrect - state.sessionStats.correctStart;
+  const accuracy = attempts ? Math.round((correct / attempts) * 100) : 0;
+  const level = globalLevel();
+  // Compute average speed for this session only
+  let speed = 0;
+  if (attempts > 0) {
+    let totalTime = 0, totalCount = 0;
+    Object.values(state.sessionNoteTimes).forEach(({ sum, count }) => {
+      totalTime += sum;
+      totalCount += count;
+    });
+    speed = totalCount > 0 ? +(totalTime / totalCount / 1000).toFixed(2) : 0;
+  }
+  const volume = attempts;
+  const now = new Date();
+  const dateStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  state.sessionSnapshots.push({
+    timestamp: Date.now(),
+    date: dateStr,
+    level,
+    accuracy,
+    speed,
+    volume,
+  });
+  saveState();
+}
+
 function endSessionByTimeout() {
   if (state.sessionTicker) {
     clearInterval(state.sessionTicker);
@@ -2101,6 +2194,7 @@ function endSessionByTimeout() {
   sessionTimerEl.classList.add('hidden');
   setFeedback('', '');
   renderSessionSummary();
+  recordSessionSnapshot();
   state.sessionStats = null;
 
   stopBtn.classList.add('hidden');
@@ -2153,6 +2247,11 @@ stopBtn.addEventListener('click', () => {
   stopListeningNow();
   pauseSessionTimer();
   setFeedback(t('pausedMessage'), '');
+  // Record a snapshot before leaving session mode so the progress chart
+  // includes this session's state.
+  if (state.sessionStats) {
+    recordSessionSnapshot();
+  }
   stopBtn.classList.add('hidden');
   skipBtn.classList.add('hidden');
   micBtn.classList.add('hidden');
